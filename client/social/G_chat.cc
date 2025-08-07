@@ -902,7 +902,7 @@ void G_chat::quit(vector<Group> &joinedGroup) {
     
     string name,reply;
     while(true) {
-         cout << "请输入你要拉入群聊的的好友名字" << endl;
+         cout << "请输入你要拉入群聊的好友名字" << endl;
         return_last();
         getline(cin, name);
         if (name == "0") {

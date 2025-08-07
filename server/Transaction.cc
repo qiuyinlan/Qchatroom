@@ -906,7 +906,13 @@ void deactivateAccount(int fd, User &user) {
     // 将用户添加到注销集合
     redis.sadd("deactivated_users", user.getUID());
 
-    user.setEmail("");
+     string user_info = redis.hget("user_info", user.getUID());
+
+     json root = json::parse(user_info);
+            
+                root["email"] = "";  
+                redis.hset("user_info", user.getUID(), root.dump());
+                redis.hdel("email_to_uid", user.getEmail());
 
 
     
