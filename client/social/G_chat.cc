@@ -124,11 +124,8 @@ void G_chat::syncGL(std::vector<Group> &joinedGroup) {
             return;
         }
         try {
-            // 验证JSON格式
             if (group_info == "0" ) {
                 return;
-                // cerr << "[ERROR] 接收到无效的JSON格式: " << group_info << endl;
-                // throw runtime_error("JSON格式错误");
             }
             
             group.json_parse(group_info);
@@ -136,7 +133,7 @@ void G_chat::syncGL(std::vector<Group> &joinedGroup) {
         } catch (const exception& e) {
             cerr << "[ERROR] 创建的群JSON解析失败: " << e.what() << endl;
             cerr << "[ERROR] 问题JSON: " << group_info << endl;
-            throw; // 重新抛出异常，让上层处理
+            throw; 
         }
 
     }

@@ -157,7 +157,6 @@ void processUnifiedMessage(const string& msg) {
         string senderInfo = msg.substr(8);
         string notifyMsg;
 
-        // 检查是否包含消息数量
         if (senderInfo.find("(") != string::npos) {
             // 格式：用户名(N条)
             notifyMsg = senderInfo + "消息";
@@ -179,20 +178,19 @@ void processUnifiedMessage(const string& msg) {
             return;
     }
     else if (msg[0] == '{') {
-        // JSON格式的聊天消息
         try {
             Message message;
             message.json_parse(msg);
             if (message.getGroupName() == "1") {
                 // 私
                 if (ClientState::inChat && message.getUidFrom() == ClientState::currentChatUID) {
-                    // 当前私聊窗口
+                    // 私聊
                     cout << message.getUsername() << ": " << message.getContent() << endl;
                 }
             } else {
                 // 群
                 if (ClientState::inChat && message.getUidTo() == ClientState::currentChatUID) {
-                    // 当前群聊窗口
+                    // 群聊
                     cout << "[" << message.getGroupName() << "] "
                          << message.getUsername() << ": "
                          << message.getContent() << endl;

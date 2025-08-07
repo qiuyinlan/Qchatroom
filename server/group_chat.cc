@@ -160,14 +160,11 @@ void GroupChat::sync() {
         redisReply **arr = redis.smembers(joined);
         for (int i = 0; i < num; i++) {
             string groupId = arr[i]->str;
-            std::cout << "[DEBUG] 正在获取群信息，群ID: " << groupId << std::endl;
             string json = redis.hget("group_info", groupId);
-            std::cout << "[DEBUG] 获取到的JSON: " << json << std::endl;
 
             // 在发送前验证JSON格式
             try {
                 nlohmann::json testParse = nlohmann::json::parse(json);
-                std::cout << "[DEBUG] JSON解析测试成功" << std::endl;
             } catch (const std::exception& e) {
                 std::cout << "[ERROR] JSON解析测试失败: " << e.what() << std::endl;
                 std::cout << "[ERROR] 问题JSON: " << json << std::endl;
