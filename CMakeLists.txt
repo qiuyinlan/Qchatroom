@@ -54,12 +54,6 @@ add_executable(
         utils/Group.cc
 )
 
-add_executable(
-        test.out
-        utils/User.cc
-        utils/Group.cc
-        server/test.cc
-)
 
 target_link_libraries(
         server.out PRIVATE curl
@@ -72,7 +66,3 @@ target_link_libraries(
         nlohmann_json::nlohmann_json
 )
 
-target_link_libraries(
-        test.out
-        nlohmann_json::nlohmann_json
-)
