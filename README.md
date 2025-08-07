@@ -1,5 +1,5 @@
  ```
- git clone git@github.com:qiuyinlan/chatroom.git
+ git clone git@github.com:qiuyinlan/Qchatroom.git
  ```
 
  
