@@ -103,7 +103,7 @@ void ChatSession::startGroupChat(int groupIndex, const vector<Group>& joinedGrou
 
     
     string msg;
-     std::cout << "\033[90m输入【send】发送文件，【recv】接收文件，【0】退出聊天\033[0m" << std::endl;
+     std::cout << "\033[90m输入【send】发送文件，【recv】接收文件，【quit】退出聊天\033[0m" << std::endl;
 
     while (true) {
         getline(cin, msg);
@@ -114,7 +114,7 @@ void ChatSession::startGroupChat(int groupIndex, const vector<Group>& joinedGrou
             return ;
         }
 
-        if (msg == "0") {
+        if (msg == "quit") {
             // 退出群聊状态
             ClientState::exitChat();
             sendMsg(fd, EXIT);
@@ -308,7 +308,7 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
         string msg, json,reply;
 
         //真正开始聊天
-        std::cout << "\033[90m输入【send】发送文件，【recv】接收文件，【0】退出聊天\033[0m" << std::endl;
+        std::cout << "\033[90m输入【send】发送文件，【recv】接收文件，【quit】退出聊天\033[0m" << std::endl;
 
         while (true) {
             getline(cin,msg);
@@ -318,7 +318,7 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
                 sendMsg(fd, EXIT);
                 return;
             }
-            if (msg == "0") {
+            if (msg == "quit") {
                 // 退出聊天状态
                 ClientState::exitChat();
                 sendMsg(fd, EXIT);
