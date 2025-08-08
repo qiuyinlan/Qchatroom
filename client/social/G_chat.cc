@@ -911,7 +911,7 @@ void G_chat::quit(vector<Group> &joinedGroup) {
         }
         sendMsg(fd,name);
         recvMsg(fd,reply);
-        cout << reply << endl;
+        
         if (reply == "-1") {
             cout << RED <<"TA不是你的好友（你们可能没加好友或者你默默被他（她）删除了）" << RESET << endl;
             continue;

@@ -1,7 +1,3 @@
-//
-// Created by shawn on 23-8-7/8.
-//
-
 #ifndef THREADPOOL_HPP
 #define THREADPOOL_HPP
 

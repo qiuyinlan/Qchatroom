@@ -50,6 +50,8 @@ void FileTransfer::sendFile_Friend(const User& targetUser, const User& myUser) c
             return;
         }
         inputFile = open(filePath.c_str(), O_RDONLY);
+    
+    // 目录路径是可以打开的，但是不可以用目录路径去sendfile,会崩溃！！！
         if (inputFile == -1) {
             cerr << "无法打开文件,请检查输入路径" << endl;
             continue;
@@ -61,7 +63,11 @@ void FileTransfer::sendFile_Friend(const User& targetUser, const User& myUser) c
             continue;
         }
 
-       
+       if (!S_ISREG(fileStat.st_mode)) {
+            cerr << RED <<"该路径不是普通文件，不能发送（可能是目录路径!!!）"<<RESET << endl;
+            close(inputFile);
+            continue;
+        }
         break;
     }
 

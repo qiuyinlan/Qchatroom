@@ -90,9 +90,9 @@ void start_chat(int fd, User &user) {
         }
         freeReplyObject(arr[i]);
     }
-    string friend_uid;
+    string UID;
     //接收客户端发送的想要聊天的好友的UID
-    recvMsg(fd, friend_uid);
+    recvMsg(fd, UID);
     
 
     //先检查删除，屏蔽，注销。与发给对方无关
@@ -108,6 +108,51 @@ void start_chat(int fd, User &user) {
             redis.srem("is_chat", user.getUID());
             return;
         }
+        //发文件的特殊检查
+        if (msg == "send" || msg == "recv") {
+            //删除
+            if (!redis.sismember(UID, user.getUID())) {
+
+                string me = user.getUID() + UID;
+                
+
+                string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
+                int receiver_fd = stoi(receiver_fd_str);
+                sendMsg(receiver_fd, "FRIEND_VERIFICATION_NEEDED");
+                sendMsg(fd,"fail");
+                
+                recvMsg(fd,msg);
+                redis.lpush(me, msg);
+                continue; 
+             }
+            //被屏蔽
+            if (redis.sismember("blocked" + UID, user.getUID())) {
+                string me = user.getUID() + UID;
+                
+                string receiver_fd_str = redis.hget("unified_receiver", user.getUID());//是给原客户端的通知线程发，不是UID,是GETUID()
+                int receiver_fd = stoi(receiver_fd_str);
+                sendMsg(receiver_fd, "BLOCKED_MESSAGE");
+                sendMsg(fd,"fail");
+
+                recvMsg(fd,msg);
+                redis.lpush(me, msg);
+                continue;
+            }
+            //注销
+            if (redis.sismember("deactivated_users", UID)) {
+                string me = user.getUID() + UID;
+        
+                string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
+                int receiver_fd = stoi(receiver_fd_str);
+                sendMsg(receiver_fd, "DEACTIVATED_MESSAGE");
+                sendMsg(fd,"fail");
+
+                recvMsg(fd,msg);
+                redis.lpush(me, msg);
+                continue;
+            }
+            
+        }
         //正常消息
         
         Message message;
@@ -117,8 +162,9 @@ void start_chat(int fd, User &user) {
             cout << "[DEBUG] JSON解析失败，跳过消息: " << msg << endl;
             continue;
         }
-        string UID = message.getUidTo();
         
+        
+
         // 检查是否被对方删除,删除和屏蔽==对方发消息给我，且我在聊天框
         if (!redis.sismember(UID, user.getUID())) {
             // 消息保存到发送者的历史记录中
@@ -130,7 +176,6 @@ void start_chat(int fd, User &user) {
             sendMsg(receiver_fd, "FRIEND_VERIFICATION_NEEDED");
             continue; 
         }
-        
         // 被屏蔽
         if (redis.sismember("blocked" + UID, user.getUID())) {
             string me = user.getUID() + UID;
@@ -288,31 +333,39 @@ void findRequest(int fd, User &user) {
     }
     redisReply **arr = redis.smembers(user.getUID() + "add_friend");
     if (arr != nullptr) {
-        string request_info;
+        string user_info;
         User friendRequest;
         for (int i = 0; i < num; i++) {
-            request_info = redis.hget("user_info", arr[i]->str);
-            friendRequest.json_parse(request_info);
+            user_info = redis.hget("user_info", arr[i]->str);
+            friendRequest.json_parse(user_info);
 
             sendMsg(fd, friendRequest.getUsername());
             string reply;
 
             recvMsg(fd, reply);
-            if (reply == "REFUSED") {
+            if (reply == "REFUSE") {
+                sendMsg(fd, user_info);
                 redis.srem(user.getUID() + "add_friend", arr[i]->str);
                 freeReplyObject(arr[i]);
-                continue; // 继续处理下一个申请，而不是直接return
-            }
-            //这里才是真正的好友列表
-            //将对方加到我的好友列表中
-            redis.sadd(user.getUID(), arr[i]->str);
-            //将我加到对方的好友列表中
-            redis.sadd(arr[i]->str, user.getUID());
-            //将好友申请从缓冲区删除
-            redis.srem(user.getUID() + "add_friend", arr[i]->str);
+                continue; 
+            }else if (reply == "IGNORE") {
+                freeReplyObject(arr[i]);
+                continue;
+            }else if (reply == "ACCEPT") {
+                redis.sadd(user.getUID(), arr[i]->str);
+                redis.sadd(arr[i]->str, user.getUID());
+                redis.srem(user.getUID() + "add_friend", arr[i]->str);
 
-            sendMsg(fd, request_info);
-            freeReplyObject(arr[i]);
+                //加上好友之后，我俩的好友申请列表里，都不会再出现对方了！！！
+                redis.srem(string(arr[i]->str) + "add_friend", user.getUID());
+                freeReplyObject(arr[i]);
+                continue;
+            }else if (reply == "0") {
+                freeReplyObject(arr[i]);
+                return; 
+            }
+
+           
         }
     }
 }
@@ -323,6 +376,9 @@ void del_friend(int fd, User &user) {
     string UID;
 
     recvMsg(fd, UID);
+    if (UID == "0") {
+        return;
+    }
     //从我的好友列表删除对方（单向删除）
     redis.srem(user.getUID(), UID);
     //删除我对他的历史记录
@@ -333,6 +389,7 @@ void del_friend(int fd, User &user) {
     // redis.sadd(UID + "del", user.getUsername());
 }
 
+//屏蔽好友
 void blockedLists(int fd, User &user) {
     Redis redis;
     redis.connect();
@@ -343,6 +400,7 @@ void blockedLists(int fd, User &user) {
     redis.sadd("blocked" + user.getUID(), blocked_uid);
 }
 
+//解除屏蔽
 void unblocked(int fd, User &user) {
     Redis redis;
     redis.connect();

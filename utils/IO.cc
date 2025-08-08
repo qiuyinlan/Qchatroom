@@ -51,7 +51,7 @@ int sendMsg(int fd, string msg) {
 
 
 
-    // 验证消息长度
+    // 消息长度
     if (msg.size() > 10000) {
         cout << "警告：消息过长 " << msg.size() << " 字节" << endl;
     }

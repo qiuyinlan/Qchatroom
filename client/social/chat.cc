@@ -121,9 +121,8 @@ void ChatSession::startGroupChat(int groupIndex, const vector<Group>& joinedGrou
             return;
         }
 
-        // 群聊文件传输
+        // 发文件，记得先屏蔽检查！！！
         if (msg == "send") {
-            
             FileTransfer fileTransfer;
             //thread fileSender(&FileTransfer::sendFile_Group, &fileTransfer, fd, selectedGroup, user);
             
@@ -306,7 +305,7 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
         ClientState::enterChat(friend_UID);
 
        
-        string msg, json;
+        string msg, json,reply;
 
         //真正开始聊天
         std::cout << "\033[90m输入【send】发送文件，【recv】接收文件，【0】退出聊天\033[0m" << std::endl;
@@ -325,9 +324,16 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
                 sendMsg(fd, EXIT);
                 return;
             }
-            // 文件
-            if(msg == "send"){
-            
+            // 文件,私聊的时候，就需要检查是否能发成功，再发文件！！！
+            if (msg == "send") {
+                sendMsg(fd, "send");
+                recvMsg(fd,reply);
+                if (reply == "fail"){
+                     message.setContent(msg);
+                    json = message.to_json();
+                    sendMsg(fd, json);
+                    continue;
+                }
                 FileTransfer fileTransfer;
                 // thread fileSender(&FileTransfer::sendFile_Friend, &fileTransfer, fd, my_friends[who-1].second, user);
                 // fileSender.detach();
@@ -338,6 +344,14 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
                 continue;
             }
             if(msg == "recv"){
+                sendMsg(fd, "recv");
+                recvMsg(fd,reply);
+                if (reply == "fail"){
+                     message.setContent(msg);
+                    json = message.to_json();
+                    sendMsg(fd, json);
+                    continue;
+                }
                 FileTransfer fileTransfer;
                 fileTransfer.recvFile_Friend( user);
                 cout << "服务器正在处理，可以继续聊天（输入消息后按enter发送）" << endl;

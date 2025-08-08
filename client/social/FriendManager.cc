@@ -77,12 +77,12 @@ void FriendManager::findRequest(vector<pair<string, User>> &my_friends) const {
         return;
     }
     cout << "你收到" << num << "条好友申请" << endl;
-    string friendRequestName;
+    string friendRequestName,user_info;
     for (int i = 0; i < num; i++) {
         recvMsg(fd, friendRequestName);
-        cout << "收到" << friendRequestName << "的好友申请 [1]同意 [0]拒绝" << endl;
+        cout << "收到" << friendRequestName << "的好友申请 [1]同意 [2]拒绝 [3]忽略 [0]返回菜单" << endl;
         int choice;
-        while (!(cin >> choice) || (choice != 0 && choice != 1)) {
+        while (!(cin >> choice) || (choice != 0 && choice != 1 && choice != 2 && choice != 3)) {
             if (cin.eof()) {
                 cout << "读到文件结尾" << endl;
                 return;
@@ -94,21 +94,23 @@ void FriendManager::findRequest(vector<pair<string, User>> &my_friends) const {
         cin.ignore(INT32_MAX, '\n');
         string reply;
         if (choice == 0) {
-            reply = "REFUSED";
-        } else {
-            reply = "ACCEPTED";
-        }
-        sendMsg(fd, reply);
-        string request_info;
-        if (choice == 1) {
+            sendMsg(fd, "0");
+            return;
+        } else if ( choice == 1) {
+            sendMsg(fd, "ACCEPT");
             cout << "好友添加成功" << endl;
-            User newFriend;
-            recvMsg(fd, request_info);
-            newFriend.json_parse(request_info);
-            // 移除本地更新，让syncFriends从服务器获取最新数据
-            // my_friends.emplace_back(request_info, newFriend);
-        } else {
-            cout << "你拒绝了" << friendRequestName << "的请求" << endl;
+            continue;
+        } else if ( choice == 2) {
+            sendMsg(fd, "REFUSE");
+            recvMsg(fd,user_info);
+            User her;
+            her.json_parse(user_info);
+            cout << "你已拒绝" << her.getUsername() << "的好友申请" << endl;
+            continue;
+        } else if ( choice == 3) {
+            sendMsg(fd, "IGNORE");
+            cout << "你已忽略" << friendRequestName << "的好友申请,下次再做决定" << endl;
+            continue;
         }
     }
 }
@@ -132,8 +134,14 @@ void FriendManager::delFriend(vector<pair<string, User>> &my_friends) {
     cout << "----------------------------------------" << endl;
     while (true) {
         cout << "请输入要删除的好友" << endl;
+        return_last();
         string del;
         getline(cin, del);
+
+        if (del == "0"){
+            sendMsg(fd,"0");
+            return;
+        }
         if (cin.eof()) {
             cout << "读到文件结尾" << endl;
             return;
@@ -188,7 +196,7 @@ void FriendManager::blockedLists(vector<pair<string, User>> &my_friends) const {
     cout << "请输入你要屏蔽的好友的序号" << endl;
     return_last();
     int who;
-    while (!(cin >> who) || who < 0 || who > my_friends.size()) {
+    while (!(cin >> who) || who <= 0 || who > my_friends.size()) {
         if (cin.eof()) {
             cout << "读到文件结尾" << endl;
             return;
@@ -244,7 +252,7 @@ void FriendManager::unblocked(vector<pair<string, User>> &my_friends) const {
     cout << "请输入你要解除屏蔽的好友序号" << endl;
     return_last();
     int who;
-    while (!(cin >> who) || who < 0 || who > num) {
+    while (!(cin >> who) || who <= 0 || who > num) {
         if (cin.eof()) {
             cout << "读到文件结尾" << endl;
             return;
