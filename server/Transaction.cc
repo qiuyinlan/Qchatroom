@@ -151,7 +151,11 @@ void start_chat(int fd, User &user) {
                 redis.lpush(me, msg);
                 continue;
             }
-            
+            //bug 三个if都没满足的时候，就会继续往下走！！ else要保底！！
+            else{
+                sendMsg(fd,"success");
+                continue;
+            }
         }
         //正常消息
         
@@ -159,7 +163,7 @@ void start_chat(int fd, User &user) {
         try {
             message.json_parse(msg);
         } catch (const exception& e) {
-            cout << "[DEBUG] JSON解析失败，跳过消息: " << msg << endl;
+            cout << "[DEBUG] 正常消息之JSON解析失败，跳过消息: " << msg << endl;
             continue;
         }
         
@@ -276,10 +280,7 @@ void add_friend(int fd, User &user) {
     }
     cout << "[DEBUG] 添加好友请求: " << user.getUsername() << " 想添加 " << username << endl;
     
-    // if (!redis.hexists("username_to_uid", username)) {
-    //     sendMsg(fd, "-1"); // 用户不存在
-    //     return;
-    // }
+    
     string UID = redis.hget("username_to_uid", username);
     if (redis.sismember("deactivated_users", UID)) {
         sendMsg(fd, "-6"); // 已注销，无法添加
@@ -304,9 +305,11 @@ void add_friend(int fd, User &user) {
     redis.sadd(UID + "add_friend", user.getUID());//对方的好友申请列表
 
     // 不管在不在，先设置好友申请通知标记，在的话直接推
+    //好友申请的离线通知列表
     redis.sadd(UID +"add_f_notify", user.getUID());//对方的好友申请通知列表
 
 
+    //UID是想要添加的好友的UID
     // 用户在线
     if (redis.hexists("unified_receiver", UID)) {
         string receiver_fd_str = redis.hget("unified_receiver", UID);
@@ -314,7 +317,7 @@ void add_friend(int fd, User &user) {
         sendMsg(receiver_fd, REQUEST_NOTIFICATION);
      
         // 清除通知
-        redis.srem("add_f_notify", UID);
+        redis.srem(UID +"add_f_notify", user.getUID());
     }
 
     string user_info = redis.hget("user_info", UID);

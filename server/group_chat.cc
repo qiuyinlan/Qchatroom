@@ -234,6 +234,24 @@ void GroupChat::startChat() {
             return;
         }
 
+        if (msg == "send" || msg == "recv") {
+            //移除群聊
+            if (!redis.sismember(group.getMembers(), user.getUID())) {
+                string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
+                int receiver_fd = stoi(receiver_fd_str);
+                sendMsg(receiver_fd, "NO_IN_GROUP");
+                sendMsg(fd,"fail");
+
+                recvMsg(fd,msg);
+                redis.lpush(group.getGroupUid() + "history", msg);
+                continue;
+            }
+
+             else{
+                sendMsg(fd,"success");
+                continue;
+             }
+        }
 
         if (!redis.sismember(group.getMembers(), user.getUID())) {
 
@@ -293,7 +311,7 @@ void GroupChat::startChat() {
             }
             freeReplyObject(arr[i]);
         }
-
+ cout << "333" << endl;
     }
 }
 
@@ -766,6 +784,7 @@ void GroupChat::getperson(){
     }
         sendMsg(fd, "1");
         cout << "好友添加成功" << endl;
+        redis.sadd("if_add" + group.getGroupUid(), UID);
         redis.hset("user_join_time", group.getGroupUid()+UID, user.get_time());
         redis.sadd("joined" + UID, group.getGroupUid());
         redis.sadd(group.getMembers(), UID);

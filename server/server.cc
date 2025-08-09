@@ -109,6 +109,7 @@ int main(int argc, char *argv[]) {
     setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (void *) &opt, sizeof(opt));
     Bind(listenfd, IP, PORT);
     Listen(listenfd);
+    
     int epfd = epoll_create(1024);
 
     struct epoll_event temp, ep[1024];
@@ -126,7 +127,8 @@ int main(int argc, char *argv[]) {
                 continue;
 
             int fd = ep[i].data.fd;
-            //正常客户端连接
+
+            //listenfd变成可读状态，代表有新客户端连接上来了
             if (ep[i].data.fd == listenfd) {
                 struct sockaddr_in cli_addr;
                 memset(&cli_addr, 0, sizeof(cli_addr));
@@ -145,16 +147,21 @@ int main(int argc, char *argv[]) {
                 flag |= O_NONBLOCK;
                 fcntl(connfd, F_SETFL, flag);
 
-                temp.data.fd = connfd;
                 temp.events = EPOLLIN;
-                //启用 TCP keepalive 功能。
+                temp.data.fd = connfd;
+               
+        
+                //启用 TCP keepalive 
                 int keep_alive = 1;
-                //表示在连接空闲3秒后开始发送 TCP keepalive 探测包。
-                int keep_idle = 3;
-                //表示在发送第一个 TCP keepalive 探测包后，每隔1秒发送一个探测包。
-                int keep_interval = 1;
-                //表示如果在发送30个 TCP keepalive 探测包后仍然没有收到响应，连接将被关闭。
-                int keep_count = 30;
+                //表示在连接空闲n秒后开始发送 TCP keepalive 探测包。
+                int keep_idle = 30;
+
+                //表示在发送第一个 TCP keepalive 探测包后，每隔n秒发送一个探测包。
+                int keep_interval = 30;
+                //表示如果在发送n个 TCP keepalive 探测包后仍然没有收到响应，连接将被关闭。
+                int keep_count = 15;
+
+
                 setsockopt(connfd, SOL_SOCKET, SO_KEEPALIVE, &keep_alive, sizeof(keep_alive));
                 setsockopt(connfd, IPPROTO_TCP, TCP_KEEPIDLE, &keep_idle, sizeof(keep_idle));
                 setsockopt(connfd, SOL_TCP, TCP_KEEPINTVL, &keep_interval, sizeof(keep_interval));

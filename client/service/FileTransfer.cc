@@ -51,7 +51,7 @@ void FileTransfer::sendFile_Friend(const User& targetUser, const User& myUser) c
         }
         inputFile = open(filePath.c_str(), O_RDONLY);
     
-    // 目录路径是可以打开的，但是不可以用目录路径去sendfile,会崩溃！！！
+    // bug目录路径是可以打开的，但是不可以用目录路径去sendfile,会崩溃！！！
         if (inputFile == -1) {
             cerr << "无法打开文件,请检查输入路径" << endl;
             continue;
@@ -282,7 +282,7 @@ void FileTransfer::sendFile_Group( const Group& targetGroup, const User& myUser)
 
         // 按0返回
         if (filePath == "0") {
-            cout << "\033[90m已取消发送文件，可以继续聊天（输入消息后按enter发送）\033[0m" << endl;
+            cout << "\033[90m已取消发送文件\033[0m" << endl;
             // 不要发送"0"给服务器，直接返回
             return;
         }
@@ -299,7 +299,12 @@ void FileTransfer::sendFile_Group( const Group& targetGroup, const User& myUser)
             close(inputFile);
             continue;
         }
-
+        //bug目录路径可以打开的
+        if (!S_ISREG(fileStat.st_mode)) {
+            cerr << RED <<"该路径不是普通文件，不能发送（可能是目录路径!!!）"<<RESET << endl;
+            close(inputFile);
+            continue;
+        }
        
         break;
     }

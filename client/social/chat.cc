@@ -122,7 +122,16 @@ void ChatSession::startGroupChat(int groupIndex, const vector<Group>& joinedGrou
         }
 
         // 发文件，记得先屏蔽检查！！！
+        string reply,json;
         if (msg == "send") {
+            sendMsg(fd, "send");
+            recvMsg(fd,reply);
+            if (reply == "fail"){
+                message.setContent(msg);
+                json = message.to_json();
+                sendMsg(fd, json);
+                continue;
+            }
             FileTransfer fileTransfer;
             //thread fileSender(&FileTransfer::sendFile_Group, &fileTransfer, fd, selectedGroup, user);
             
@@ -131,6 +140,14 @@ void ChatSession::startGroupChat(int groupIndex, const vector<Group>& joinedGrou
             continue;
         }
         if (msg == "recv") {
+             sendMsg(fd, "recv");
+            recvMsg(fd,reply);
+            if (reply == "fail"){
+                message.setContent(msg);
+                json = message.to_json();
+                sendMsg(fd, json);
+                continue;
+            }
             string G_uid = selectedGroup.getGroupUid() ;
             FileTransfer fileTransfer;
             fileTransfer.recvFile_Group( user,G_uid);
