@@ -6,7 +6,7 @@
 #include "chat.h"
 #include <unistd.h>
 #include "../utils/proto.h"
-#include "../utils/IO.h"
+#include "IO.h"
 #include "Notifications.h"
 #include "../utils/User.h"
 #include "../client/service/FileTransfer.h"

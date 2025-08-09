@@ -1,6 +1,6 @@
 #include "Transaction.h"
 #include "Redis.h"
-#include "../utils/IO.h"
+#include "IO.h"
 #include "../utils/proto.h"
 #include <iostream>
 #include "group_chat.h"
@@ -980,7 +980,7 @@ void deactivateAccount(int fd, User &user) {
     // 从在线状态中移除
     redis.hdel("is_online", user.getUID());
     redis.hdel("unified_receiver", user.getUID());
-    redis.srem("is_chat", user.getUID());
+    
 
 
     

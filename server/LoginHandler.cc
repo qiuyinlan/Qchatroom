@@ -2,7 +2,7 @@
 #include "Transaction.h"
 #include <functional>
 #include <sys/epoll.h>
-#include "../utils/IO.h"
+#include "IO.h"
 #include "../utils/proto.h"
 #include "Redis.h"
 #include <iostream>

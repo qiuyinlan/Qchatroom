@@ -1,6 +1,6 @@
 #include "FriendManager.h"
 #include "../utils/proto.h"
-#include "../utils/IO.h"
+#include "../IO.h"
 #include <iostream>
 #include <vector>
 #include <string>

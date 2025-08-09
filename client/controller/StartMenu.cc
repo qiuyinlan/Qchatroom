@@ -1,7 +1,7 @@
 #include "StartMenu.h"
 #include <iostream>
 #include <cstdint>
-#include "../utils/IO.h"
+#include "IO.h"
 #include "../utils/proto.h"
 #include "OperationMenu.h"
 #include "User.h"

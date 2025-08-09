@@ -1,6 +1,6 @@
 #include "FileTransfer.h"
 #include "../utils/proto.h"
-#include "../utils/IO.h"
+#include "IO.h"
 #include "../utils/Group.h"
 #include <iostream>
 #include <vector>

@@ -40,13 +40,31 @@ void Bind(int fd, const string &ip, int port) {
     }
 }
 
+// int Accept(int fd, struct sockaddr *cli_addr, socklen_t *cli_len) {
+//     int connfd = accept(fd, cli_addr, cli_len);
+//     if (connfd < 0) {
+//         sys_err("accept error");
+//     }
+//     return connfd;
+// }
+
 int Accept(int fd, struct sockaddr *cli_addr, socklen_t *cli_len) {
     int connfd = accept(fd, cli_addr, cli_len);
     if (connfd < 0) {
+        // EAGAIN 和 EWOULDBLOCK 
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return -1; 
+        } 
+        if (errno == EINTR) {
+            return -1;
+        }
+        // 其他情况是真错误
         sys_err("accept error");
     }
     return connfd;
 }
+
+
 
 void Connect(int fd, const std::string &ip, int port) {
     int ret;

@@ -29,7 +29,7 @@ add_executable(
         server/tool.cc
         utils/User.cc
         utils/TCP.cc
-        utils/IO.cc
+        server/IO.cc
         utils/proto.cc
         utils/Group.cc
         client/service/Notifications.cc
@@ -49,7 +49,7 @@ add_executable(
         client/social/G_chat.cc
         utils/User.cc
         utils/TCP.cc
-        utils/IO.cc
+        client/IO.cc
         utils/proto.cc
         utils/Group.cc
 )

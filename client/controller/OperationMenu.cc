@@ -11,7 +11,7 @@
 #include <thread>
 #include <iomanip>
 #include "../utils/proto.h"
-#include "../utils/IO.h"
+#include "IO.h"
 
 using namespace std;
 

@@ -1,5 +1,5 @@
 #include "../utils/TCP.h"
-#include "../utils/IO.h"
+#include "IO.h"
 #include "LoginHandler.h"
 #include <sys/epoll.h>
 #include <fcntl.h>
@@ -110,15 +110,28 @@ int main(int argc, char *argv[]) {
     Bind(listenfd, IP, PORT);
     Listen(listenfd);
     
+    //非阻塞
+    int flag = fcntl(listenfd, F_GETFL, 0);
+    if (flag == -1) {
+        perror("fcntl F_GETFL");
+        exit(EXIT_FAILURE);
+    }
+    flag |= O_NONBLOCK;
+    if (fcntl(listenfd, F_SETFL, flag) == -1) {
+        perror("fcntl F_SETFL");
+        exit(EXIT_FAILURE);
+    }
+
     int epfd = epoll_create(1024);
 
     struct epoll_event temp, ep[1024];
     
     
     temp.data.fd = listenfd;
-    temp.events = EPOLLIN;
+    temp.events = EPOLLIN | EPOLLET ;
     epoll_ctl(epfd, EPOLL_CTL_ADD, listenfd, &temp);
 
+    //原本：一次处理一个连接,一次只recv一个信息，现：一次while（true）全部读完
     while (true) {
         ret = epoll_wait(epfd, ep, 1024, -1);
         for (int i = 0; i < ret; i++) {
@@ -129,106 +142,131 @@ int main(int argc, char *argv[]) {
             int fd = ep[i].data.fd;
 
             //listenfd变成可读状态，代表有新客户端连接上来了
-            if (ep[i].data.fd == listenfd) {
-                struct sockaddr_in cli_addr;
-                memset(&cli_addr, 0, sizeof(cli_addr));
-                socklen_t cli_len = sizeof(cli_addr);
+            if (fd == listenfd) {
+                //循环一定要有退出的判断EAGAIN
+                while (true) {
+                    struct sockaddr_in cli_addr;
+                    memset(&cli_addr, 0, sizeof(cli_addr));
+                    socklen_t cli_len = sizeof(cli_addr);
 
-                //accept
-                int connfd = Accept(listenfd, (struct sockaddr *) &cli_addr, &cli_len);
+                    //accept
+                    int connfd = Accept(listenfd, (struct sockaddr *) &cli_addr, &cli_len);
+                    if (connfd < 0){
+                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                            break;
+                        } else if (errno == EINTR) {
+                            continue;
+                        } else {
+                            perror("accept");
+                            break;
+                        }
+                    }
+                    cout << "received from " << inet_ntop(AF_INET, &cli_addr.sin_addr.s_addr, str, sizeof(str))
+                        << " at port " << ntohs(cli_addr.sin_port) << endl;
+                    cout << "connectfd " << connfd << "-----client " << ++num << endl;
+
+                    int flag = fcntl(connfd, F_GETFL);
+                    flag |= O_NONBLOCK;
+                    fcntl(connfd, F_SETFL, flag);
+
+                    temp.events = EPOLLIN | EPOLLET;
+                    temp.data.fd = connfd;
                 
+                    //TCP keepalive 
+                    int keep_alive = 1;
+                    int keep_idle = 30;
+                    int keep_interval = 30;
+                    int keep_count = 15;
+                    setsockopt(connfd, SOL_SOCKET, SO_KEEPALIVE, &keep_alive, sizeof(keep_alive));
+                    setsockopt(connfd, IPPROTO_TCP, TCP_KEEPIDLE, &keep_idle, sizeof(keep_idle));
+                    setsockopt(connfd, SOL_TCP, TCP_KEEPINTVL, &keep_interval, sizeof(keep_interval));
+                    setsockopt(connfd, SOL_TCP, TCP_KEEPCNT, &keep_count, sizeof(keep_count));
+                
+                    //将connfd加入监听红黑树
+                    ret = epoll_ctl(epfd, EPOLL_CTL_ADD, connfd, &temp);
+                    if (ret < 0) {
+                        sys_err("epoll_ctl error");
+                    }
 
-
-                cout << "received from " << inet_ntop(AF_INET, &cli_addr.sin_addr.s_addr, str, sizeof(str))
-                     << " at port " << ntohs(cli_addr.sin_port) << endl;
-                cout << "cfd " << connfd << "-----client " << ++num << endl;
-
-                int flag = fcntl(connfd, F_GETFL);
-                flag |= O_NONBLOCK;
-                fcntl(connfd, F_SETFL, flag);
-
-                temp.events = EPOLLIN;
-                temp.data.fd = connfd;
-               
-        
-                //启用 TCP keepalive 
-                int keep_alive = 1;
-                //表示在连接空闲n秒后开始发送 TCP keepalive 探测包。
-                int keep_idle = 30;
-
-                //表示在发送第一个 TCP keepalive 探测包后，每隔n秒发送一个探测包。
-                int keep_interval = 30;
-                //表示如果在发送n个 TCP keepalive 探测包后仍然没有收到响应，连接将被关闭。
-                int keep_count = 15;
-
-
-                setsockopt(connfd, SOL_SOCKET, SO_KEEPALIVE, &keep_alive, sizeof(keep_alive));
-                setsockopt(connfd, IPPROTO_TCP, TCP_KEEPIDLE, &keep_idle, sizeof(keep_idle));
-                setsockopt(connfd, SOL_TCP, TCP_KEEPINTVL, &keep_interval, sizeof(keep_interval));
-                setsockopt(connfd, SOL_TCP, TCP_KEEPCNT, &keep_count, sizeof(keep_count));
-                //将connfd加入监听红黑树
-                ret = epoll_ctl(epfd, EPOLL_CTL_ADD, connfd, &temp);
-                if (ret < 0) {
-                    sys_err("epoll_ctl error");
                 }
-
+                
             } 
             //数据连接
               else {
-                int recv_ret = recvMsg(fd, msg);
+                msg.clear(); 
+                while (true) {
+                    int recv_ret = recvMsg(fd, msg);
 
-                if (recv_ret <= 0 || msg.empty()) {
-                    // 连接断开，从epoll中移除
-                    cout << "[INFO] 客户端 " << fd << " 断开连接" << endl;
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
-                    close(fd);
-                    continue;
-                }
+                    if (recv_ret > 0) {
+                        // 完整消息接收成功，处理msg
+                        break;  // 处理完一个完整消息后跳出，等待下次通知（也可以继续循环，视业务需求）
+                    } 
+                    else if (recv_ret == 1) {
+                        // 说明数据还没读完，ET模式需要一次读尽
+                        // 这里继续循环，尝试读完整消息
+                        continue;
+                    } 
+                    else if (recv_ret == 0) {
+                        // 连接关闭，退出循环，清理资源
+                        cout << "[INFO] 客户端 " << fd << " 断开连接" << endl;
+                        redis.hdel("is_online", to_string(fd));
+                        redis.hdel("unified_receiver", to_string(fd));
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
+                        close(fd);
+                        break;
+                    } 
+                    else {
+                        // 出错
+                        cerr << "[ERROR] recvMsg error fd=" << fd << endl;
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
+                        close(fd);
+                        break;
+                    }
 
-                if (msg == LOGIN) {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                    pool.addTask([=](){ serverLogin(epfd, fd); });
-                } 
-                //额外的连接
-                else if (msg == "HEARTBEAT") {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                    pool.addTask([=](){ hearbeat(epfd, fd); });
-                }
-                else if (msg == UNIFIED_RECEIVER) {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                    pool.addTask([=](){ handleUnifiedReceiver(epfd, fd); });
-                } else if (msg == SENDFILE_F) {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                    pool.addTask([=](){ sendFile_Friend(epfd, fd); });
-                } else if (msg == RECVFILE_F) {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                    pool.addTask([=](){ recvFile_Friend(epfd, fd); });
-                } else if (msg == SENDFILE_G) {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                    pool.addTask([=](){ sendFile_Group(epfd, fd); });
-                } else if (msg == RECVFILE_G) {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                    pool.addTask([=](){ recvFile_Group(epfd, fd); });
-                }
-                //正常请求
-                else if (msg == REQUEST_CODE) {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);//发验证码，发前检查邮箱
-                    pool.addTask([=](){ handleRequestCode(epfd, fd); });
-                } else if (msg == REGISTER_WITH_CODE) {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                    pool.addTask([=](){ serverRegisterWithCode(epfd, fd); });//注册
-                } else if (msg == REQUEST_RESET_CODE) {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                    pool.addTask([=](){ handleResetCode(epfd, fd); });
-                } else if (msg == RESET_PASSWORD_WITH_CODE) {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                    pool.addTask([=](){ resetPasswordWithCode(epfd, fd); });
-                } else if (msg == FIND_PASSWORD_WITH_CODE) {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                    pool.addTask([=](){ findPasswordWithCode(epfd, fd); });
-                }
-                else{
-                    cout << "[DEBUG] 未知协议: '" << msg << "' (长度: " << msg.length() << ")" << endl;
+                    if (msg == LOGIN) {
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        pool.addTask([=](){ serverLogin(epfd, fd); });
+                    } 
+                    //额外的连接
+                    else if (msg == "HEARTBEAT") {
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        pool.addTask([=](){ hearbeat(epfd, fd); });
+                    } else if (msg == UNIFIED_RECEIVER) {
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        pool.addTask([=](){ handleUnifiedReceiver(epfd, fd); });
+                    } else if (msg == SENDFILE_F) {
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        pool.addTask([=](){ sendFile_Friend(epfd, fd); });
+                    } else if (msg == RECVFILE_F) {
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        pool.addTask([=](){ recvFile_Friend(epfd, fd); });
+                    } else if (msg == SENDFILE_G) {
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        pool.addTask([=](){ sendFile_Group(epfd, fd); });
+                    } else if (msg == RECVFILE_G) {
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        pool.addTask([=](){ recvFile_Group(epfd, fd); });
+                    }
+                    //正常请求
+                    else if (msg == REQUEST_CODE) {
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);//发验证码，发前检查邮箱
+                        pool.addTask([=](){ handleRequestCode(epfd, fd); });
+                    } else if (msg == REGISTER_WITH_CODE) {
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        pool.addTask([=](){ serverRegisterWithCode(epfd, fd); });//注册
+                    } else if (msg == REQUEST_RESET_CODE) {
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        pool.addTask([=](){ handleResetCode(epfd, fd); });
+                    } else if (msg == RESET_PASSWORD_WITH_CODE) {
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        pool.addTask([=](){ resetPasswordWithCode(epfd, fd); });
+                    } else if (msg == FIND_PASSWORD_WITH_CODE) {
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        pool.addTask([=](){ findPasswordWithCode(epfd, fd); });
+                    }
+                    else{
+                        cout << "[DEBUG] 未知协议: '" << msg << "' (长度: " << msg.length() << ")" << endl;
+                    }
                 }
             }
         }
