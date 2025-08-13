@@ -239,7 +239,7 @@ void heartbeat(string UID) {
     Connect(fd, IP, PORT);
 
     sendMsg(fd, "HEARTBEAT");
-    sendMsg(fd,UID);
+    sendMsg(fd, UID);
    
     while (true) {
         this_thread::sleep_for(chrono::seconds(30));  // 秒检测一次
@@ -251,4 +251,3 @@ void heartbeat(string UID) {
         }
     }
 }
-

@@ -37,43 +37,84 @@ void signalHandler(int signum) {
 }
 
 //超时，映射
-void hearbeat(int epfd,int fd){
+
+void hearbeat(int epfd, int fd) {
     Redis redis;
     redis.connect();
 
-    int receiver_fd;
-    string UID;
-   
-    recvMsg(fd,UID);
-    // 给 socket 设置了接收数据的最大阻塞时间为  秒
+    // 将心跳连接切换为阻塞，才能正确依赖 SO_RCVTIMEO
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags != -1) {
+        fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+    }
+
+    // 设置阻塞读超时 40s
     struct timeval timeout;
-    timeout.tv_sec = 40;//s
-    timeout.tv_usec = 0;//ms
+    timeout.tv_sec = 40;
+    timeout.tv_usec = 0;
     if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
-    perror("setsockopt failed");
-}
-string buf;
+        perror("setsockopt SO_RCVTIMEO failed");
+    }
+
+    // 先接收客户端UID（阻塞版）
+    string uid;
+    if (recvMsg(fd, uid) <= 0) {
+        cout << "[ERROR] 接收心跳UID失败，关闭连接" << endl;
+        epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
+        close(fd);
+        return;
+    }
+
     while (true) {
         string buf;
-        int len = recvMsg(fd, buf);
-        int err = errno; 
+        int len = recvMsg(fd, buf); // 阻塞读取，受 SO_RCVTIMEO 影响
         if (len <= 0) {
-            if (err == EWOULDBLOCK || err == EAGAIN || err == EINTR || err == ETIMEDOUT) {//可能阻塞了，但是还是活着
-            cout << "[超时] fd=" << fd << " 40秒无数据，断开" << endl;
-            }else {
-                cout << "[ERROR] 心跳检测接收失败，fd=" << fd << " 连接断开" << endl;
+            // 超时或连接断开，进行清理
+            cout << "[INFO] 心跳连接异常/超时，uid=" << uid << "，关闭连接" << endl;
+
+            // 关闭对应的统一接收连接（若存在且合法）
+            string data_fd_str = redis.hget("unified_receiver", uid);
+            bool ok_num = !data_fd_str.empty() && all_of(data_fd_str.begin(), data_fd_str.end(), ::isdigit);
+            if (ok_num) {
+                int data_fd = stoi(data_fd_str);
+                cout << "[清理] 关闭统一接收连接 fd=" << data_fd << endl;
+                epoll_ctl(epfd, EPOLL_CTL_DEL, data_fd, nullptr);
+                close(data_fd);
+                redis.hdel("unified_receiver", uid);
+            } else {
+                cout << "[WARN] 未找到统一接收连接或值非法，uid=" << uid << endl;
             }
+
+            redis.hdel("is_online", uid);
             break;
         }
-        
-        if (buf == "HEARTBEAT") {
-            cout << RED << fd << "心跳" << RESET << endl;
-        } 
-    }
-    
-    close(fd);
 
+        if (buf == "HEARTBEAT") {
+            // 发送心跳响应（阻塞）
+            if (sendMsg(fd, "HEARTBEAT_ACK") < 0) {
+                cout << "[ERROR] 心跳响应发送失败，uid=" << uid << endl;
+
+                // 同样清理统一接收连接
+                string data_fd_str = redis.hget("unified_receiver", uid);
+                bool ok_num = !data_fd_str.empty() && all_of(data_fd_str.begin(), data_fd_str.end(), ::isdigit);
+                if (ok_num) {
+                    int data_fd = stoi(data_fd_str);
+                    cout << "[清理] 关闭统一接收连接 fd=" << data_fd << endl;
+                    epoll_ctl(epfd, EPOLL_CTL_DEL, data_fd, nullptr);
+                    close(data_fd);
+                    redis.hdel("unified_receiver", uid);
+                }
+                redis.hdel("is_online", uid);
+                break;
+            }
+        }
+    }
+
+    epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
+    close(fd);
 }
+
+
 int main(int argc, char *argv[]) {
     if (argc == 1) {
         IP = "10.30.0.146";
