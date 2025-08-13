@@ -4,6 +4,12 @@
 #include <sys/epoll.h>
 #include "../utils/IO.h"
 #include "../utils/proto.h"
+
+// 显式声明utils中的阻塞IO函数，避免与server/IO.h冲突
+extern int sendMsg(int fd, std::string msg);
+extern int recvMsg(int fd, std::string &msg);
+// 显式声明ET下的非阻塞接收函数，避免包含server/IO.h与utils/IO.h的宏冲突
+extern int recvMsgET(int fd, std::string &msg);
 #include "Redis.h"
 #include <iostream>
 #include <map>
@@ -13,6 +19,8 @@
 #include <nlohmann/json.hpp>
 #include <random>
 #include <ctime>
+#include <fcntl.h>
+#include <arpa/inet.h>
 #include <atomic>
 #include <vector>
 #include "./group_chat.h"
@@ -22,6 +30,88 @@
 using namespace std;
 using json = nlohmann::json;
 
+
+//fd转换
+void serverLoginWithData(int epfd, int fd, const std::string& loginData) {
+    cout << "[DEBUG] 进入登录函数（带数据），fd=" << fd << ", 数据长度: " << loginData.size() << endl;
+
+    // 将socket切换为阻塞模式
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags == -1) {
+        perror("[ERROR] fcntl F_GETFL failed");
+        close(fd);
+        return;
+    }
+    if (fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) == -1) {
+        perror("[ERROR] fcntl F_SETFL failed");
+        close(fd);
+        return;
+    }
+
+    User user;
+    Redis redis;
+
+    if (!redis.connect()) {
+        cout << "Redis connection failed during login(with data)" << endl;
+        sendMsg(fd, "-4"); // 服务器内部错误
+        close(fd);
+        return;
+    }
+
+    LoginRequest loginRequest;
+    try {
+        loginRequest.json_parse(loginData);
+    } catch (const exception& e) {
+        cout << "[ERROR] 登录请求JSON解析失败: " << e.what() << endl;
+        cout << "[ERROR] 请求内容: " << loginData << endl;
+        sendMsg(fd, "-4"); // 服务器内部错误
+        return;
+    }
+
+    string email = loginRequest.getEmail();
+    string password = loginRequest.getPassword();
+    cout << "[DEBUG] 登录请求(带数据): 邮箱=" << email << endl;
+
+    if (!redis.hexists("email_to_uid", email)) {
+        sendMsg(fd, "-1"); // 账号不存在
+        return;
+    }
+    string UID = redis.hget("email_to_uid", email);
+    string user_info = redis.hget("user_info", UID);
+
+    if (user_info.empty()) {
+        cout << "[ERROR] 用户信息为空，UID: " << UID << endl;
+        sendMsg(fd, "-1");
+        return;
+    }
+
+    try {
+        user.json_parse(user_info);
+    } catch (const exception& e) {
+        cout << "[ERROR] 用户信息JSON解析失败: " << e.what() << endl;
+        cout << "[ERROR] 用户信息: " << user_info << endl;
+        sendMsg(fd, "-4");
+        return;
+    }
+
+    if (password != user.getPassword()) {
+        sendMsg(fd, "-2"); // 密码错误
+        return;
+    }
+
+    if (redis.hexists("is_online", UID)) {
+        cout << "[DEBUG] 用户 " << UID << " 已经在线，拒绝重复登录" << endl;
+        sendMsg(fd, "-3");
+        return;
+    }
+
+    sendMsg(fd, "1");
+    redis.hset("is_online", UID, to_string(fd));
+    sendMsg(fd, user_info);
+
+    cout << "[DEBUG] 登录成功(带数据)，开始serverOperation" << endl;
+    serverOperation(fd, user);
+}
 
 
 //登陆

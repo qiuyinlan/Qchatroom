@@ -42,9 +42,8 @@ void Bind(int fd, const string &ip, int port) {
 
 int Accept(int fd, struct sockaddr *cli_addr, socklen_t *cli_len) {
     int connfd = accept(fd, cli_addr, cli_len);
-    if (connfd < 0) {
-        sys_err("accept error");
-    }
+    // 在ET模式下，accept可能返回EAGAIN，这是正常的
+    // 不应该直接退出程序，而是返回错误码让调用者处理
     return connfd;
 }
 

@@ -4,9 +4,11 @@
 
 #include "User.h"
 
+//转换
+void serverLoginWithData(int epfd, int fd, const std::string& loginData);
+
 
 //以下是登陆后的业务派发
-
 void serverLogin(int epfd, int fd);
 
 void serverOperation(int fd, User &user);

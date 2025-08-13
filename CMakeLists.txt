@@ -29,6 +29,7 @@ add_executable(
         server/group_chat.cc
         server/Threadpool.cpp
         server/tool.cc
+        server/IO.cc
         utils/User.cc
         utils/TCP.cc
         utils/IO.cc
