@@ -447,11 +447,32 @@ void G_chat::managed_Group(vector<Group> &managedGroup) const {
         while (true) {
             ownerMenu();
             int choice;
-            while (!(cin >> choice) || (choice < 0 || choice > 5)) {
-                cout << "输入格式错误，请输入0-5之间的数字" << endl;
+           while (true) {
+                // 先尝试读取整数
+                if (cin >> choice) {
+                    // 如果在允许范围内 → 跳出
+                    if (choice == 0 || choice >0 || choice < 6) {
+                        cin.ignore(INT32_MAX, '\n'); // 清掉这一行剩余的输入
+                        break;
+                    } else {
+                        cout << "输入格式错误" << endl;
+                    }
+                } 
+                else {
+                    // 读取失败
+                    if (cin.eof()) {
+                        cout << "读到文件结尾" << endl;
+                        sendMsg(fd, BACK);
+                        return;
+                    }
+                    cout << "输入格式错误" << endl;
+                    cin.clear(); // 清理 fail 状态
+                }
+
+                // 无论是范围错误还是解析失败，都清掉剩余输入
                 cin.ignore(INT32_MAX, '\n');
             }
-            cin.ignore(INT32_MAX, '\n');
+
             if (choice == 0) {
                 sendMsg(fd, BACK);
                 break;
@@ -471,9 +492,7 @@ void G_chat::managed_Group(vector<Group> &managedGroup) const {
                 deleteGroup(managedGroup[which]);
                 break;
             } 
-             else if (choice == 6) {
-               // getperson()
-            }
+            
         }
 
 
@@ -483,17 +502,31 @@ void G_chat::managed_Group(vector<Group> &managedGroup) const {
         while (true) {
             managedMenu();
             int choice;
-            while (!(cin >> choice) || (choice != 1 && choice != 2 && choice != 0)) {
-                if (cin.eof()) {
-                    cout << "读到文件结尾" << endl;
-                    sendMsg(fd, BACK);
-                    return;
+            while (true) { // 先尝试读取整数
+                if (cin >> choice) {
+                    // 如果在允许范围内 → 跳出
+                    if (choice == 0 || choice == 1 || choice == 2) {
+                        cin.ignore(INT32_MAX, '\n'); // 清掉这一行剩余的输入
+                        break;
+                    } else {
+                        cout << "输入格式错误" << endl;
+                    }
+                } 
+                else {
+                    // 读取失败
+                    if (cin.eof()) {
+                        cout << "读到文件结尾" << endl;
+                        sendMsg(fd, BACK);
+                        return;
+                    }
+                    cout << "输入格式错误" << endl;
+                    cin.clear(); // 清理 fail 状态
                 }
-                cout << "输入格式错误" << endl;
-                cin.clear();
+
+                // 无论是范围错误还是解析失败，都清掉剩余输入
                 cin.ignore(INT32_MAX, '\n');
             }
-            cin.ignore(INT32_MAX, '\n');
+
             if (choice == 0) {
     
                 sendMsg(fd, BACK);

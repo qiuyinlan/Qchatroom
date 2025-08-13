@@ -167,7 +167,7 @@ void clientOperation(int fd, User &user) {
     }
 }
 
-// 注销账户
+// 注销账户  bugfix:注销的时候，统一接收线程要断开！！
 void deactivateAccount(int fd, User &user) {
     
 //     string num_str;
@@ -178,7 +178,7 @@ void deactivateAccount(int fd, User &user) {
 
     cout << "\n=== 账户注销 ===" << endl;
     cout << "警告：注销后您将无法再次使用此用户名，也无法使用此邮箱登录！" << endl;
-    cout << "您的账户信息将被保留，但无法接收消息与登陆。" << endl;
+    cout << "您的账户信息将被保留，但无法接收消息与登陆,你创建的所有群聊将被自动解散" << endl;
     cout << "确定要注销账户吗？(y/n): ";
     
     string choice;
@@ -190,8 +190,9 @@ void deactivateAccount(int fd, User &user) {
         
     
             cout << "账户已成功注销！" << endl;
-            cout << "您将退出登录..." << endl;
+            cout << "稍等...您将退出登录..." << endl;
             // 发送退出登录协议
+            sleep(1);
             sendMsg(fd, BACK);
             return;
         

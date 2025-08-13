@@ -596,18 +596,104 @@ cout << reply << endl;
                 
                     }
                     continue;
-            } else if(order == "2"){
-                
-            } else {
-                cout << "输入错误" << endl;
+            } else if (order == "2") { // 下一页
+                sendMsg(fd, "2");
+                string reply;
+                recvMsg(fd, reply);
+                if (reply == "less") {
+                    cout << "已经是最新消息，没有更多内容了哦" << endl;
+                    continue;
+                }
+                // 接收下20条消息
+                system("clear");
+                for (int k = 0; k < 20; k++) {
+                    int msg_ret = recvMsg(fd, history_message);
+                    if (msg_ret <= 0) {
+                        cout << "接收历史消息失败，停止接收" << endl;
+                        break;
+                    }
+                    if (history_message.empty()) continue;
+                    history.json_parse(history_message);
+                    if (history.getUsername() == user.getUsername()) {
+                        cout << "你：" << history.getContent() << endl;
+                        cout << "\t\t\t\t" << history.getTime() << endl;
+                    } else {
+                        cout << history.getUsername() << "  :  " << history.getContent() << endl;
+                        cout << "\t\t\t\t" << history.getTime() << endl;
+                    }
+                }
                 continue;
-            }
-    }
+                
+        }
 
     }
-    //群聊
-    else{
-            sendMsg(fd,"G_HISTORY");
-            
-    }
 }
+
+
+}
+    //群聊
+//     else{
+//             sendMsg(fd,"G_HISTORY");
+//             // 获取群ID
+//             string group_id = my_groups[who - my_friends.size() - 1].first;
+//             sendMsg(fd, group_id);
+//             cout << "--------------------------------------" << endl;
+//             cout << "【群聊：" << my_groups[who - my_friends.size() - 1].second << "】"<< endl;
+
+//             Message history;
+//             string nums;
+//             // 接收消息数量
+//             int recv_ret = recvMsg(fd, nums);
+//             if (recv_ret <= 0) {
+//                 cout << "接收历史消息数量失败" << endl;
+//                 return;
+//             }
+
+//             int num = stoi(nums);
+//             string history_message;
+//             // 接收并显示初始20条消息
+//             for (int j = 0; j < num; j++) {
+//                 int msg_ret = recvMsg(fd, history_message);
+//                 if (msg_ret <= 0) break;
+//                 history.json_parse(history_message);
+//                 if (history.getUsername() == user.getUsername()) {
+//                     cout << "你：" << history.getContent() << endl;
+//                 } else {
+//                     cout << history.getUsername() << "  :  " << history.getContent() << endl;
+//                 }
+//                 cout << "\t\t\t\t" << history.getTime() << endl;
+//             }
+//             cout << YELLOW << "------------------- 群聊历史消息 -------------------" << RESET << endl;
+
+//             // 群聊消息分页控制（与好友聊天逻辑类似）
+//             std::cout << "\033[90m输入【1】查看前20条【2】查看后20条【0】返回\033[0m" << std::endl;
+//             string order, reply;
+//             while (true) {
+//                 recvMsg(fd, reply);
+//                 if (reply == "less") {
+//                     cout << "已经全部展示完啦！" << endl;
+//                 }
+
+//                 getline(cin, order);
+//                 if (order == "0") {
+//                     sendMsg(fd, "0");
+//                     return;
+//                 } else if (order == "1" || order == "2") {
+//                     sendMsg(fd, order);
+//                     // 接收并显示消息（实现逻辑与好友聊天相同）
+//                     system("clear");
+//                     for (int k = 0; k < 20; k++) {
+//                         int msg_ret = recvMsg(fd, history_message);
+//                         if (msg_ret <= 0) break;
+//                         if (history_message.empty()) continue;
+//                         history.json_parse(history_message);
+//                         // 消息显示逻辑...
+//                     }
+//                 }
+//             }
+//     }
+    
+// }
+
+
+

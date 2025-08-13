@@ -165,10 +165,137 @@ cout << order << endl;
                 }
                 continue;
                 
-        }
+        } else if (order == "2"){
+                // 实现查看当前后20条消息逻辑
+                if (down <= 0) {
+                    sendMsg(fd, "less");
+                    cout << "已经是最早的消息了" << endl;
+                    continue;
+                }
+                
+                // 调整分页范围
+                up -= 20;
+                down -= 20;
+                if (down < 0) down = 0;
+                
+                // 发送消息范围
+                sendMsg(fd, to_string(up - 1));
+                sendMsg(fd, to_string(down));
+                
+                // 发送消息内容
+                for (int i = up - 1; i >= down; i--) {
+                    string msg_content = arr[i]->str;
+                    try {
+                        json test_json = json::parse(msg_content);
+                        sendMsg(fd, msg_content);
+                    } catch (const exception& e) {
+                        continue;
+                    }
+                    freeReplyObject(arr[i]);
+                }
+                continue;
+            }
+
     }
     
 }
+
+void G_history(int fd, User &user) {
+//     cout << "ghistory 开始" << endl;
+//     Redis redis;
+//     redis.connect();
+
+//     string group_id;
+//     recvMsg(fd, group_id);
+//     string records_index = "group:" + group_id;
+//     int num = redis.llen(records_index);
+//     int up = 20;
+//     int down = 0;
+//     int first = num;
+//     bool signal = false;
+
+//     if (num > up) {
+//         num = up;
+//         signal = true;
+//     }
+//     sendMsg(fd, to_string(num));
+
+//     redisReply **arr = redis.lrange(records_index, "", to_string(num - 1));
+//     for (int i = num - 1; i >= 0; i--) {
+//         string msg_content = arr[i]->str;
+//         try {
+//             json test_json = json::parse(msg_content);
+//             sendMsg(fd, msg_content);
+//         } catch (const exception& e) {
+//             continue;
+//         }
+//         freeReplyObject(arr[i]);
+//     }
+//     freeReplyObject(arr);
+
+//     string order;
+//     while (true) {
+//         if(signal) sendMsg(fd,"more");
+//         else sendMsg(fd,"less");
+
+//         recvMsg(fd, order);
+//         if (order == "0") return;
+
+//         if (order == "1") {
+//             if(!signal) {
+//                 sendMsg(fd,"less");
+//                 continue;
+//             }
+
+//             up += ;
+// down += 20;
+//             if (up >= first) {
+//                 signal = false;
+//                 sendMsg(fd,"less");
+// sendMsg(fd,to_string(first));
+//                 sendMsg(fd,to_string(down));
+//                 for (int i = first - 1; i >= down; i--) {
+//                     redisReply *reply = redis.lindex(records_index, to_string(i));
+//                     if (reply) {
+//                         sendMsg(fd, reply->str);
+//                         freeReplyObject(reply);
+//                     }
+//                 }
+//             } else {
+//                 sendMsg(fd,"more");
+//                 for (int i = up - 1; i >= down; i--) {
+//                     redisReply *reply = redis.lindex(records_index, to_string(i));
+//                     if (reply) {
+//                         sendMsg(fd, reply->str);
+//                         freeReplyObject(reply);
+//                     }
+//                 }
+//             }
+//         } else if (order == "2") {
+//             if (down <= 0) {
+//                 sendMsg(fd,"less");
+//                 continue;
+//             }
+
+//             up -= 20;
+//             down -= ;
+//             if (down < 0) down = 0;
+
+//             sendMsg(fd, to_string(up));
+//             sendMsg(fd, to_string(down));
+//             for (int i = up - 1 i >= down; i--) {
+//                 redisReply *reply = redis.lindex(records_index,to_string(i));
+//                 if (reply) {
+//                     sendMsg(fd, reply->str);
+//                     freeReplyObject(reply);
+//                 }
+//             }
+//         }
+//     }
+}
+
+
+
 void start_chat(int fd, User &user) {
     Redis redis;
     redis.connect();
@@ -1100,22 +1227,28 @@ void deactivateAccount(int fd, User &user) {
                 //不在线
                 if (!redis.hexists("is_online", UIDto)) {
                     redis.sadd(UIDto +"deleteAC_notify", group.getGroupName());
-                    freeReplyObject(brr[j]);
                     continue;
                 }
                 //发送通知
                 string receiver_fd_str = redis.hget("unified_receiver", UIDto);
                 int receiver_fd = stoi(receiver_fd_str);
                 sendMsg(receiver_fd, "deleteAC_notify:" + group.getGroupName());
+                
             }
 
+        //关闭客户端线程
+        string receiver_fd_str = redis.hget("unified_receiver", UIDto);
+        int receiver_fd = stoi(receiver_fd_str);
+        sendMsg(receiver_fd, "deAC");
+        close(receiver_fd);
+            
             for (int k = 0; k < len; k++) {
                 UIDto = brr[k]->str;//每个群成员的uid
                 redis.srem("joined" + UIDto, group.getGroupUid());
                 redis.srem("created" + UIDto, group.getGroupUid());
                 redis.srem("managed" + UIDto, group.getGroupUid());
                 redis.hdel("user_join_time", group.getGroupUid() + UIDto);
-                freeReplyObject(arr[k]);
+                freeReplyObject(brr[k]);
             }
             
        

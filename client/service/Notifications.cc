@@ -41,6 +41,7 @@ mutex ClientState::messageMutex;
 
 //统一消息接收线程（使用独立连接）
 void unifiedMessageReceiver( string UID) {
+    bool state = true; //线程开启
     ClientState::myUID = UID;
 
     
@@ -58,26 +59,41 @@ void unifiedMessageReceiver( string UID) {
         //一直处于接收状态，收到——>丢给处理函数去处理
         int ret = recvMsg(receiveFd, receivedMsg);
         if (ret <= 0) {
-            cout << "统一接收连接断开，退出消息接收线程" << endl;
+            cout << "退出消息接收,已退出登陆" << endl;
             break;
         }
 
        
 
         //处理不同类型的消息
-        processUnifiedMessage(receivedMsg);
+        processUnifiedMessage(receivedMsg,state);
+        if (state == false){
+            return;
+        }
     }
 
     close(receiveFd);
 }
 
-void processUnifiedMessage(const string& msg) {
+void processUnifiedMessage(const string& msg, bool& state) {
 
 
     if(msg=="nomsg"){
         cout<<"没有离线消息"<<endl;
         return;
     }
+
+    //注销
+    if (msg == "deAC") {
+        state == false;
+        return;
+    }
+
+
+
+
+
+
     // 处理特殊系统响应,删除和屏蔽不需要保存到离线！！！只是一个提示提示完就消失了
     if (msg == "FRIEND_VERIFICATION_NEEDED") {
         string notifyMsg = "系统提示：对方开启了好友验证，你还不是他（她）朋友，请先发送朋友验证请求，对方验证通过后，才能聊天。";

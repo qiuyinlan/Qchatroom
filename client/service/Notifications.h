@@ -16,7 +16,7 @@ extern std::atomic<bool> stopNotify;
 
 // 新的统一消息处理
 void unifiedMessageReceiver(string UID);
-void processUnifiedMessage(const string& msg);
+void processUnifiedMessage(const string& msg, bool& state);
 void heartbeat(string UID);
 // 全局状态管理类完整定义
 class ClientState {

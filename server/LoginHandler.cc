@@ -165,7 +165,7 @@ void serverOperation(int fd, User &user) {
         }  else if (temp == "F_HISTORY") {
             F_history(fd, user);
         }  else if (temp == "G_HISTORY") {
-           // F_history(fd, user);
+            G_history(fd, user);
         }  else if (temp == DEACTIVATE_ACCOUNT) {
             deactivateAccount(fd, user);
         } else {
