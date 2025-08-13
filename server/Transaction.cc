@@ -66,29 +66,36 @@ void synchronize(int fd, User &user) {
 
 //待修复隐患：群聊因为时间，实际可能比20条少
 void F_history(int fd, User &user) {
-    cout << "fhistory 开始" << endl;
+
     Redis redis;
     redis.connect();
 
     string records_index;
     //收历史记录索引
     recvMsg(fd, records_index);
+
     int num = redis.llen(records_index);
+
     int up = 20;
     int down = 0;
     int first = num;//初始值
     bool signal = false;//大于20变成true,有剩余，小于变成false
+    
     //发
     if (num > 20) {
         num = 20;
         signal = true;
+    } else {
+        // 如果总数小于等于20，说明没有更多消息了
+        signal = false;
     }
     
+
     sendMsg(fd, to_string(num));
 
     redisReply **arr = redis.lrange(records_index, "0", to_string(num - 1));
     //先发最新的消息，所以要倒序遍历
-    for (int i = up - 1; i >= down; i--) {
+    for (int i = num - 1; i >= 0; i--) {
         string msg_content = arr[i]->str;
         try {
             json test_json = json::parse(msg_content);
@@ -99,199 +106,330 @@ void F_history(int fd, User &user) {
         }
         freeReplyObject(arr[i]);
     }
+    // 释放初始数组
+    if (arr != nullptr) {
+        free(arr);
+    }
     
+    // 发送总消息数给客户端，用于状态判断
+    sendMsg(fd, to_string(first));
     
     string order;
     while (true) {
-        if(signal == true){
-            sendMsg(fd,"more");
-        }else {
-            sendMsg(fd,"less");
-        }
-        recvMsg(fd,order);
+        recvMsg(fd, order);
         if (order == "0") {
             return;
         }
 
-cout << order << endl;
-        if (order == "1") {
-            if(signal == true){
-                sendMsg(fd,"more");
-                cout << "more" << endl;
-            }else {
-                sendMsg(fd,"less");
-                cout << "less" << endl;
+        if (order == "1") { // 查看前20条（更早的消息）
+
+            // 如果当前没有更多消息，直接返回
+            if (!signal || down >= first) {
+
+                sendMsg(fd, "less");
                 continue;
             }
             
             //前20
-            
             up += 20;
             down += 20;
+
+            
             //剩余<20。false
-            if (up >= first){
+            if (up >= first) {
                 signal = false;
-                sendMsg(fd,"less");
-                sendMsg(fd,to_string(first - 1));
-                sendMsg(fd,to_string(down));
-                for (int i = first -1; i >= down; i--) {
-                    
-                    string msg_content = arr[i]->str;
-                    try {
-                        json test_json = json::parse(msg_content);
-                        //循环发信息
-                        sendMsg(fd, msg_content);
-                    } catch (const exception& e) {
-                        continue;
-                    }
-                    freeReplyObject(arr[i]);
-                }
-                continue;
-            }
-                //前20,bug好像没释放完,不过暂时不影响
-                //剩余>20，true
-                for (int i = up; i >= down; i--) {
-                    signal = true;
-                    sendMsg(fd,"more");
-                    string msg_content = arr[i]->str;
-                    try {
-                        json test_json = json::parse(msg_content);
-                        //循环发信息
-                        sendMsg(fd, msg_content);
-                    } catch (const exception& e) {
-                        continue;
-                    }
-                    freeReplyObject(arr[i]);
-                }
-                continue;
-                
-        } else if (order == "2"){
-                // 实现查看当前后20条消息逻辑
-                if (down <= 0) {
-                    sendMsg(fd, "less");
-                    cout << "已经是最早的消息了" << endl;
-                    continue;
-                }
-                
-                // 调整分页范围
-                up -= 20;
-                down -= 20;
-                if (down < 0) down = 0;
-                
-                // 发送消息范围
-                sendMsg(fd, to_string(up - 1));
+
+                sendMsg(fd, "more");
+                sendMsg(fd, to_string(first - 1));
                 sendMsg(fd, to_string(down));
                 
-                // 发送消息内容
-                for (int i = up - 1; i >= down; i--) {
-                    string msg_content = arr[i]->str;
+                // 重新获取消息范围
+                int actualCount = first - down;
+                if (actualCount <= 0) {
+                    sendMsg(fd, "less");
+                    continue;
+                }
+                redisReply **newArr = redis.lrange(records_index, to_string(down), to_string(first - 1));
+                for (int i = actualCount - 1; i >= 0; i--) {
+                    string msg_content = newArr[i]->str;
                     try {
                         json test_json = json::parse(msg_content);
                         sendMsg(fd, msg_content);
                     } catch (const exception& e) {
                         continue;
                     }
-                    freeReplyObject(arr[i]);
+                    freeReplyObject(newArr[i]);
+                }
+                // 释放数组
+                if (newArr != nullptr) {
+                    free(newArr);
                 }
                 continue;
             }
+            
+            //前20,剩余>20，true
+            signal = true;
 
+            sendMsg(fd, "more");
+            sendMsg(fd, to_string(up - 1));
+            sendMsg(fd, to_string(down));
+            
+            // 重新获取消息范围
+            int actualCount = up - down;
+            if (actualCount <= 0) {
+                sendMsg(fd, "less");
+                continue;
+            }
+            redisReply **newArr = redis.lrange(records_index, to_string(down), to_string(up - 1));
+            for (int i = actualCount - 1; i >= 0; i--) {
+                string msg_content = newArr[i]->str;
+                try {
+                    json test_json = json::parse(msg_content);
+                    sendMsg(fd, msg_content);
+                } catch (const exception& e) {
+                    continue;
+                }
+                freeReplyObject(newArr[i]);
+            }
+            // 释放数组
+            if (newArr != nullptr) {
+                free(newArr);
+            }
+            continue;
+                
+        } else if (order == "2") { // 查看后20条（更新的消息）
+
+            if (down <= 0) {
+
+                sendMsg(fd, "less");
+                continue;
+            }
+            
+            // 调整分页范围
+            up -= 20;
+            down -= 20;
+            if (down < 0) {
+
+                sendMsg(fd, "less");
+                continue;
+            }
+            // 如果返回到最新页面，重新设置signal为true
+            if (down == 0) {
+                signal = true;
+
+            }
+
+            
+
+            sendMsg(fd, "more");
+            sendMsg(fd, to_string(up - 1));
+            sendMsg(fd, to_string(down));
+            
+            // 重新获取消息范围
+            int actualCount = up - down;
+            if (actualCount <= 0) {
+                sendMsg(fd, "less");
+                continue;
+            }
+            redisReply **newArr = redis.lrange(records_index, to_string(down), to_string(up - 1));
+            for (int i = actualCount - 1; i >= 0; i--) {
+                string msg_content = newArr[i]->str;
+                try {
+                    json test_json = json::parse(msg_content);
+                    sendMsg(fd, msg_content);
+                } catch (const exception& e) {
+                    continue;
+                }
+                freeReplyObject(newArr[i]);
+            }
+            // 释放数组
+            if (newArr != nullptr) {
+                free(newArr);
+            }
+            continue;
+        }
     }
-    
 }
 
 void G_history(int fd, User &user) {
-//     cout << "ghistory 开始" << endl;
-//     Redis redis;
-//     redis.connect();
 
-//     string group_id;
-//     recvMsg(fd, group_id);
-//     string records_index = "group:" + group_id;
-//     int num = redis.llen(records_index);
-//     int up = 20;
-//     int down = 0;
-//     int first = num;
-//     bool signal = false;
+    Redis redis;
+    redis.connect();
 
-//     if (num > up) {
-//         num = up;
-//         signal = true;
-//     }
-//     sendMsg(fd, to_string(num));
+    string group_id;
+    recvMsg(fd, group_id);
 
-//     redisReply **arr = redis.lrange(records_index, "", to_string(num - 1));
-//     for (int i = num - 1; i >= 0; i--) {
-//         string msg_content = arr[i]->str;
-//         try {
-//             json test_json = json::parse(msg_content);
-//             sendMsg(fd, msg_content);
-//         } catch (const exception& e) {
-//             continue;
-//         }
-//         freeReplyObject(arr[i]);
-//     }
-//     freeReplyObject(arr);
+    string records_index = group_id + "history";  // 群聊历史记录索引
 
-//     string order;
-//     while (true) {
-//         if(signal) sendMsg(fd,"more");
-//         else sendMsg(fd,"less");
+    int num = redis.llen(records_index);
 
-//         recvMsg(fd, order);
-//         if (order == "0") return;
+    int up = 20;
+    int down = 0;
+    int first = num;
+    bool signal = false;
 
-//         if (order == "1") {
-//             if(!signal) {
-//                 sendMsg(fd,"less");
-//                 continue;
-//             }
+    sendMsg(fd,redis.hget("user_join_time",group_id+user.getUID()));
 
-//             up += ;
-// down += 20;
-//             if (up >= first) {
-//                 signal = false;
-//                 sendMsg(fd,"less");
-// sendMsg(fd,to_string(first));
-//                 sendMsg(fd,to_string(down));
-//                 for (int i = first - 1; i >= down; i--) {
-//                     redisReply *reply = redis.lindex(records_index, to_string(i));
-//                     if (reply) {
-//                         sendMsg(fd, reply->str);
-//                         freeReplyObject(reply);
-//                     }
-//                 }
-//             } else {
-//                 sendMsg(fd,"more");
-//                 for (int i = up - 1; i >= down; i--) {
-//                     redisReply *reply = redis.lindex(records_index, to_string(i));
-//                     if (reply) {
-//                         sendMsg(fd, reply->str);
-//                         freeReplyObject(reply);
-//                     }
-//                 }
-//             }
-//         } else if (order == "2") {
-//             if (down <= 0) {
-//                 sendMsg(fd,"less");
-//                 continue;
-//             }
+    if (num > 20) {
+        num = 20;
+        signal = true;
+    } else {
+        // 如果总数小于等于20，说明没有更多消息了
+        signal = false;
+    }
+    sendMsg(fd, to_string(num));
 
-//             up -= 20;
-//             down -= ;
-//             if (down < 0) down = 0;
+    redisReply **arr = redis.lrange(records_index, "0", to_string(num - 1));
+    //先发最新的消息，所以要倒序遍历
+    for (int i = num - 1; i >= 0; i--) {
+        string msg_content = arr[i]->str;
+        try {
+            json test_json = json::parse(msg_content);
+            sendMsg(fd, msg_content);
+        } catch (const exception& e) {
+            continue;
+        }
+        freeReplyObject(arr[i]);
+    }
+    // 释放初始数组
+    if (arr != nullptr) {
+        free(arr);
+    }
+    
+    // 发送总消息数给客户端，用于状态判断
+    sendMsg(fd, to_string(first));
 
-//             sendMsg(fd, to_string(up));
-//             sendMsg(fd, to_string(down));
-//             for (int i = up - 1 i >= down; i--) {
-//                 redisReply *reply = redis.lindex(records_index,to_string(i));
-//                 if (reply) {
-//                     sendMsg(fd, reply->str);
-//                     freeReplyObject(reply);
-//                 }
-//             }
-//         }
-//     }
+    string order;
+    while (true) {
+        recvMsg(fd, order);
+        if (order == "0") {
+            return;
+        }
+
+        if (order == "1") { // 查看前20条（更早的消息）
+
+            // 如果当前没有更多消息，直接返回
+            if (!signal || down >= first) {
+
+                sendMsg(fd, "less");
+                continue;
+            }
+            
+            //前20
+            up += 20;
+            down += 20;
+
+            
+            //剩余<20。false
+            if (up >= first) {
+
+                signal = false;
+                sendMsg(fd, "more");
+                sendMsg(fd, to_string(first - 1));
+                sendMsg(fd, to_string(down));
+                
+                // 重新获取消息范围
+                int actualCount = first - down;
+                if (actualCount <= 0) {
+                    sendMsg(fd, "less");
+                    continue;
+                }
+                redisReply **newArr = redis.lrange(records_index, to_string(down), to_string(first - 1));
+                for (int i = actualCount - 1; i >= 0; i--) {
+                    string msg_content = newArr[i]->str;
+                    try {
+                        json test_json = json::parse(msg_content);
+                        sendMsg(fd, msg_content);
+                    } catch (const exception& e) {
+                        continue;
+                    }
+                    freeReplyObject(newArr[i]);
+                }
+                // 释放数组
+                if (newArr != nullptr) {
+                    free(newArr);
+                }
+                continue;
+            }
+            
+            //前20,剩余>20，true
+
+            signal = true;
+            sendMsg(fd, "more");
+            sendMsg(fd, to_string(up - 1));
+            sendMsg(fd, to_string(down));
+            
+            // 重新获取消息范围
+            int actualCount = up - down;
+            if (actualCount <= 0) {
+                sendMsg(fd, "less");
+                continue;
+            }
+            redisReply **newArr = redis.lrange(records_index, to_string(down), to_string(up - 1));
+            for (int i = actualCount - 1; i >= 0; i--) {
+                string msg_content = newArr[i]->str;
+                try {
+                    json test_json = json::parse(msg_content);
+                    sendMsg(fd, msg_content);
+                } catch (const exception& e) {
+                    continue;
+                }
+                freeReplyObject(newArr[i]);
+            }
+            // 释放数组
+            if (newArr != nullptr) {
+                free(newArr);
+            }
+            continue;
+                
+        } else if (order == "2") { // 查看后20条（更新的消息）
+
+            if (down <= 0) {
+
+                sendMsg(fd, "less");
+                continue;
+            }
+            
+            // 调整分页范围
+            up -= 20;
+            down -= 20;
+            if (down < 0) down = 0;
+            // 如果返回到最新页面，重新设置signal为true
+            if (down == 0) {
+                signal = true;
+
+            }
+
+            
+
+            sendMsg(fd, "more");
+            sendMsg(fd, to_string(up - 1));
+            sendMsg(fd, to_string(down));
+            
+            // 重新获取消息范围
+            int actualCount = up - down;
+            if (actualCount <= 0) {
+                sendMsg(fd, "less");
+                continue;
+            }
+            redisReply **newArr = redis.lrange(records_index, to_string(down), to_string(up - 1));
+            for (int i = actualCount - 1; i >= 0; i--) {
+                string msg_content = newArr[i]->str;
+                try {
+                    json test_json = json::parse(msg_content);
+                    sendMsg(fd, msg_content);
+                } catch (const exception& e) {
+                    continue;
+                }
+                freeReplyObject(newArr[i]);
+            }
+            // 释放数组
+            if (newArr != nullptr) {
+                free(newArr);
+            }
+            continue;
+        }
+    }
 }
 
 
@@ -323,6 +461,10 @@ void start_chat(int fd, User &user) {
             continue;
         }
         freeReplyObject(arr[i]);
+    }
+    // 释放初始数组
+    if (arr != nullptr) {
+        free(arr);
     }
     string UID;
     //接收客户端发送的想要聊天的好友的UID

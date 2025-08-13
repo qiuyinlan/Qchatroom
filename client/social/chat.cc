@@ -309,6 +309,7 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
                 cout << "\t\t\t\t" << history.getTime() << endl;
                 
         }
+        
         cout << YELLOW << "-------------------以上为历史消息-------------------" << RESET << endl;
 
         
@@ -322,7 +323,7 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
         ClientState::enterChat(friend_UID);
 
        
-        string msg, json,reply;
+        string msg, json, reply;
 
         //真正开始聊天
         std::cout << "\033[90m输入【\\send】发送文件，【\\recv】接收文件，【\\quit】退出聊天\033[0m" << std::endl;
@@ -469,21 +470,24 @@ void ChatSession::history(vector<pair<string, User>> &my_friends,vector<Group> &
     // 清输入缓冲区
     cin.ignore(INT32_MAX, '\n');
 
-    //好友
-    sendMsg(fd, "F_HISTORY");
     if (who <= my_friends.size()) {
+        //好友
+        sendMsg(fd, "F_HISTORY");
         cout << "--------------------------------------" << endl;
         cout << "【好友：" << my_friends[who-1].second.getUsername() << "】"<< endl;
         // 发送好友聊天协议
 
         string records_index = user.getUID() + my_friends[who-1].second.getUID();
+
         //发索引
         sendMsg(fd, records_index);
 
         Message history;
         string nums;
         //收数量
+
         int recv_ret = recvMsg(fd, nums);
+
         if (recv_ret <= 0) {
             cout << "接收历史消息数量失败，连接可能已断开" << endl;
             return;
@@ -531,88 +535,83 @@ void ChatSession::history(vector<pair<string, User>> &my_friends,vector<Group> &
         }
         cout << YELLOW << "-------------------以上为最近20条或20条以内的历史消息-------------------" << RESET << endl;
 
-         std::cout << "\033[90m输入【1】查看当前前20条消息，【2】查看当前后20条消息，【0】返回\033[0m" << std::endl;
-        string order,reply;
+        // 接收总消息数
+        string totalMsgCount;
+        recvMsg(fd, totalMsgCount);
+        int totalCount;
+        try {
+            totalCount = stoi(totalMsgCount);
+        } catch (const std::invalid_argument& e) {
+            cout << "接收总消息数失败，返回主菜单" << endl;
+            return;
+        } catch (const std::out_of_range& e) {
+            cout << "总消息数超出范围，返回主菜单" << endl;
+            return;
+        }
         
-          while (true) {
-            recvMsg(fd,reply);
-            if(reply == "less"){
-            cout << "已经全部展示完啦，再查看也没有啦！" << endl;
-            }
 
+
+        // 判断是否有更多消息
+        bool hasOlderMessages = (totalCount > 20); // 如果总消息数大于20，说明有更早的消息
+        bool hasNewerMessages = false; // 初始显示最新的20条，所以没有更新的消息
+        
+        // 显示状态信息
+        if (!hasOlderMessages) {
+           // cout << "【这是最早的消息】" << endl;
+        }
+        if (!hasNewerMessages) {
+          //  cout << "【这是最新的消息】" << endl;
+        }
+
+        std::cout << "\033[90m输入【1】查看前20条消息，【2】查看后20条消息，【0】返回\033[0m" << std::endl;
+        string order, reply;
+        
+        while (true) {
             getline(cin, order);
-            if(order == "0"){
-                sendMsg(fd,"0");
+            if (order == "0") {
+                sendMsg(fd, "0");
                 return;
-            } else if(order == "1"){
-                
-                sendMsg(fd,"1");
-                recvMsg(fd,reply);
-cout << reply << endl;
-                if (reply == "less"){
-                    cout << "已经全部展示完了，没有更多历史消息了哦" << endl;
-                    continue;
-                }
-                //前20
-                recvMsg(fd,reply);
-                string up_str,down_str;
-                //剩余大于20
-                system("clear");
-                if(reply == "less"){
-                    recvMsg(fd,up_str);
-                    recvMsg(fd,down_str);
-                    for(int i = stoi(up_str); i >= stoi(down_str); i--){
-                        int msg_ret = recvMsg(fd, history_message);
-                        if (msg_ret <= 0) {
-                            cout << "接收历史消息失败，停止接收" << endl;
-                            break;
-                        }
-                            history.json_parse(history_message);
-                            if (history.getUsername() == user.getUsername()) {
-                                cout << "你：" << history.getContent() << endl;
-                                cout << "\t\t\t\t" << history.getTime() << endl;
-                                continue;
-                            }
-                            cout << history.getUsername() << "  :  " << history.getContent() << endl;
-                            cout << "\t\t\t\t" << history.getTime() << endl;
-                
-                    }
-                    continue;
-                }
-                    for (int k = 20; k > 0; k--){
-                        int msg_ret = recvMsg(fd, history_message);
-                        if (msg_ret <= 0) {
-                            cout << "接收历史消息失败，停止接收" << endl;
-                            break;
-                        }
-                            history.json_parse(history_message);
-                            if (history.getUsername() == user.getUsername()) {
-                                cout << "你：" << history.getContent() << endl;
-                                cout << "\t\t\t\t" << history.getTime() << endl;
-                                continue;
-                            }
-                            cout << history.getUsername() << "  :  " << history.getContent() << endl;
-                            cout << "\t\t\t\t" << history.getTime() << endl;
-                
-                    }
-                    continue;
-            } else if (order == "2") { // 下一页
-                sendMsg(fd, "2");
-                string reply;
+            } else if (order == "1") { // 查看前20条（更早的消息）
+
+                sendMsg(fd, "1");
                 recvMsg(fd, reply);
+
                 if (reply == "less") {
-                    cout << "已经是最新消息，没有更多内容了哦" << endl;
+                    cout << "已经是最早的消息，没有更多历史消息了哦" << endl;
+                    hasOlderMessages = false; // 更新状态：没有更早的消息了
                     continue;
                 }
-                // 接收下20条消息
-                system("clear");
-                for (int k = 0; k < 20; k++) {
+                
+                // 只有在收到"more"时才接收消息范围
+                if (reply == "more") {
+                    // 接收前20条消息
+                    system("clear");
+                    string up_str, down_str;
+                    recvMsg(fd, up_str);
+                    recvMsg(fd, down_str);
+                
+                // 添加错误处理，防止stoi崩溃
+                int up_val, down_val;
+                try {
+                    up_val = stoi(up_str);
+                    down_val = stoi(down_str);
+                } catch (const std::invalid_argument& e) {
+                    cout << "接收消息范围失败，返回主菜单" << endl;
+                    cout << "[DEBUG] stoi失败，up_str: '" << up_str << "', down_str: '" << down_str << "'" << endl;
+                    return;
+                } catch (const std::out_of_range& e) {
+                    cout << "消息范围超出范围，返回主菜单" << endl;
+                    return;
+                }
+                
+                for (int i = up_val; i >= down_val; i--) {
                     int msg_ret = recvMsg(fd, history_message);
                     if (msg_ret <= 0) {
                         cout << "接收历史消息失败，停止接收" << endl;
                         break;
                     }
                     if (history_message.empty()) continue;
+                    
                     history.json_parse(history_message);
                     if (history.getUsername() == user.getUsername()) {
                         cout << "你：" << history.getContent() << endl;
@@ -622,78 +621,382 @@ cout << reply << endl;
                         cout << "\t\t\t\t" << history.getTime() << endl;
                     }
                 }
+                cout << YELLOW << "-------------------以上为历史消息-------------------" << RESET << endl;
+                
+                // 更新状态信息
+                hasNewerMessages = true; // 现在有更新的消息了
+                if (down_val >= totalCount - 20) {
+                    hasOlderMessages = false;
+                 //   cout << "【这是最早的消息】" << endl;
+                } else {
+                    hasOlderMessages = true; // 如果down_val < totalCount - 20，说明还有更早的消息
+                }
+                if (up_val <= 19) {
+                    hasNewerMessages = false;
+                 //   cout << "【这是最新的消息】" << endl;
+                }
+                
+                std::cout << "\033[90m输入【1】查看前20条消息，【2】查看后20条消息，【0】返回\033[0m" << std::endl;
+
+                }
                 continue;
                 
+            } else if (order == "2") { // 查看后20条（更新的消息）
+                sendMsg(fd, "2");
+                recvMsg(fd, reply);
+                if (reply == "less") {
+                    cout << "已经是最新消息，没有更多内容了哦" << endl;
+                    hasNewerMessages = false; // 更新状态：没有更新的消息了
+                    std::cout << "\033[90m输入【1】查看前20条消息，【2】查看后20条消息，【0】返回\033[0m" << std::endl;
+                    continue;
+                }
+                
+                // 只有在收到"more"时才接收消息范围
+                if (reply == "more") {
+                    // 接收后20条消息
+                    system("clear");
+                    string up_str, down_str;
+                    recvMsg(fd, up_str);
+                    recvMsg(fd, down_str);
+                
+                // 添加错误处理，防止stoi崩溃
+                int up_val, down_val;
+                try {
+                    up_val = stoi(up_str);
+                    down_val = stoi(down_str);
+                } catch (const std::invalid_argument& e) {
+                    cout << "接收消息范围失败，返回主菜单" << endl;
+                    cout << "[DEBUG] stoi失败，up_str: '" << up_str << "', down_str: '" << down_str << "'" << endl;
+                    return;
+                } catch (const std::out_of_range& e) {
+                    cout << "消息范围超出范围，返回主菜单" << endl;
+                    return;
+                }
+                
+                int messageCount = up_val - down_val + 1;
+                for (int k = 0; k < messageCount; k++) {
+                    int msg_ret = recvMsg(fd, history_message);
+                    if (msg_ret <= 0) {
+                        cout << "接收历史消息失败，停止接收" << endl;
+                        break;
+                    }
+                    if (history_message.empty()) continue;
+                    
+                    try {
+                        history.json_parse(history_message);
+                        if (history.getUsername() == user.getUsername()) {
+                            cout << "你：" << history.getContent() << endl;
+                            cout << "\t\t\t\t" << history.getTime() << endl;
+                        } else {
+                            cout << history.getUsername() << "  :  " << history.getContent() << endl;
+                            cout << "\t\t\t\t" << history.getTime() << endl;
+                        }
+                    } catch (const exception& e) {
+                        cout << "解析消息失败，跳过此消息" << endl;
+                        continue;
+                    }
+                }
+                cout << YELLOW << "-------------------以上为历史消息-------------------" << RESET << endl;
+                
+                // 更新状态信息
+                hasOlderMessages = true; // 现在有更早的消息了
+                if (down_val >= totalCount - 20) {
+                    hasOlderMessages = false;
+                //    cout << "【这是最早的消息】" << endl;
+                } else {
+                    hasOlderMessages = true; // 如果down_val < totalCount - 20，说明还有更早的消息
+                }
+                if (up_val <= 19) {
+                    hasNewerMessages = false;
+                //    cout << "【这是最新的消息】" << endl;
+                }
+                
+                std::cout << "\033[90m输入【1】查看前20条消息，【2】查看后20条消息，【0】返回\033[0m" << std::endl;
+                }
+                continue;
+            } else {
+                cout << "输入无效，请输入【1】、【2】或【0】" << endl;
+                continue;
+            }
         }
 
+    } else {
+        // 群聊历史消息查看
+        sendMsg(fd, "G_HISTORY");
+        // 获取群ID
+        string group_id = joinedGroup[who - my_friends.size() - 1].getGroupUid();
+        sendMsg(fd, group_id);
+        cout << "--------------------------------------" << endl;
+        cout << "【群聊：" << joinedGroup[who - my_friends.size() - 1].getGroupName() << "】"<< endl;
+
+        string join_time;
+        recvMsg(fd,join_time);
+        Message history;
+        string nums;
+        // 接收消息数量
+        int recv_ret = recvMsg(fd, nums);
+        if (recv_ret <= 0) {
+            cout << "接收历史消息数量失败" << endl;
+            return;
+        }
+
+        int num;
+        try {
+            if (nums.empty()) {
+                cout << "接收到空的消息数量字符串" << endl;
+                return;
+            }
+            num = stoi(nums);
+            if (num < 0 || num > 10000) {
+                cout << "接收到异常的消息数量: " << nums << endl;
+                return;
+            }
+        } catch (const exception& e) {
+            cout << "解析消息数量失败: '" << nums << "', 错误: " << e.what() << endl;
+            return;
+        }
+
+        string history_message;
+
+
+        int displayedCount = 0;
+        // 接收并显示初始20条消息
+        for (int j = 0; j < num; j++) {
+            int msg_ret = recvMsg(fd, history_message);
+            if (msg_ret <= 0) {
+                cout << "接收历史消息失败，停止接收" << endl;
+                break;
+            }
+            if (history_message.empty()) continue;
+            
+            history.json_parse(history_message);
+            
+            //时间,真的才计数
+            if (history.getTime() < join_time) {
+            // 如果消息时间戳小于指定时间戳，则跳过该消息
+            continue;
+             }
+
+            displayedCount++;
+
+            if (history.getUsername() == user.getUsername()) {
+                cout << "你：" << history.getContent() << endl;
+            } else {
+                cout << history.getUsername() << "  :  " << history.getContent() << endl;
+            }
+            cout << "\t\t\t\t" << history.getTime() << endl;
+        }
+        
+        // 接收总消息数
+        string totalMsgCount;
+        recvMsg(fd, totalMsgCount);
+        int totalCount;
+        try {
+            totalCount = stoi(totalMsgCount);
+        } catch (const std::invalid_argument& e) {
+            cout << "接收总消息数失败，返回主菜单" << endl;
+            return;
+        } catch (const std::out_of_range& e) {
+            cout << "总消息数超出范围，返回主菜单" << endl;
+            return;
+        }
+        
+        // 判断是否有更多消息
+        bool hasOlderMessages = (displayedCount == 20); // 如果总消息数大于20，说明有更早的消息
+        bool hasNewerMessages = false; // 初始显示最新的20条，所以没有更新的消息
+        
+        cout << YELLOW << "-------------------以上为最近20条或20条以内的群聊历史消息-------------------" << RESET << endl;
+        
+        // 显示状态信息
+        if (!hasOlderMessages) {
+          //  cout << "【这是最早的群聊消息】" << endl;
+        }
+        if (!hasNewerMessages) {
+         //   cout << "【这是最新的群聊消息】" << endl;
+        }
+
+        // 群聊消息分页控制
+        std::cout << "\033[90m输入【1】查看前20条消息，【2】查看后20条消息，【0】返回\033[0m" << std::endl;
+        string order, reply;
+        
+        // 分页状态变量
+        int currentUp = 20;
+        int currentDown = 0;
+        
+        while (true) {
+            getline(cin, order);
+            if (order == "0") {
+                sendMsg(fd, "0");
+                return;
+            } else if (order == "1") { // 查看前20条（更早的消息）
+                sendMsg(fd, "1");
+                recvMsg(fd, reply);
+                if (reply == "less") {
+                    cout << "已经是最早的消息，没有更多历史消息了哦" << endl;
+                    hasOlderMessages = false;
+                    std::cout << "\033[90m输入【1】查看前20条消息，【2】查看后20条消息，【0】返回\033[0m" << std::endl;
+                    continue;
+                }
+                
+                // 只有在收到"more"时才接收消息范围
+                if (reply == "more") {
+                    // 接收前20条消息
+                    system("clear");
+                    string up_str, down_str;
+                    recvMsg(fd, up_str);
+                    recvMsg(fd, down_str);
+                    
+                                    // 添加错误处理，防止stoi崩溃
+                    try {
+                        currentUp = stoi(up_str);
+                        currentDown = stoi(down_str);
+                    } catch (const std::invalid_argument& e) {
+                        cout << "接收消息范围失败，返回主菜单" << endl;
+                        cout << "[DEBUG] stoi失败，up_str: '" << up_str << "', down_str: '" << down_str << "'" << endl;
+                        return;
+                    } catch (const std::out_of_range& e) {
+                        cout << "消息范围超出范围，返回主菜单" << endl;
+                        return;
+                    }
+                    hasNewerMessages = true; // 现在有更新的消息了
+                    
+                    int messageCount = currentUp - currentDown + 1;
+
+                    int displayedCountThisPage = 0;
+                    for (int k = 0; k < messageCount; k++) {
+                        int msg_ret = recvMsg(fd, history_message);
+                        if (msg_ret <= 0) {
+                            cout << "接收历史消息失败，停止接收" << endl;
+                            break;
+                        }
+                        if (history_message.empty()) continue;
+                        
+                        try {
+                            history.json_parse(history_message);
+                            if (history.getUsername() == user.getUsername()) {
+                                cout << "你：" << history.getContent() << endl;
+                            } else {
+                                cout << history.getUsername() << "  :  " << history.getContent() << endl;
+                            }
+                            cout << "\t\t\t\t" << history.getTime() << endl;
+                        } catch (const exception& e) {
+                            cout << "解析消息失败，跳过此消息" << endl;
+                            continue;
+                        }
+                    }
+                    
+                                    cout << YELLOW << "-------------------以上为群聊历史消息-------------------" << RESET << endl;
+                
+                // 更新状态信息
+                hasNewerMessages = true; // 现在有更新的消息了
+
+                if (displayedCount < 20) {
+                    hasOlderMessages = false; // 没满，说明到头
+                } else {
+                    hasOlderMessages = true; // 满了，可能还有
+}
+
+                // if (currentDown >= totalCount - 20) {
+                //     hasOlderMessages = false;
+                //  //   cout << "【这是最早的群聊消息】" << endl;
+                // } else {
+                //     hasOlderMessages = true; // 如果currentDown < totalCount - 20，说明还有更早的消息
+                // }
+                // if (currentUp <= 19) {
+                //     hasNewerMessages = false;
+                //   //  cout << "【这是最新的群聊消息】" << endl;
+                // }
+
+                
+                std::cout << "\033[90m输入【1】查看前20条消息，【2】查看后20条消息，【0】返回\033[0m" << std::endl;
+                continue;
+                    
+                } else {
+                    // 如果不是"more"，则继续循环，等待下一次输入
+                    continue;
+                }
+            } else if (order == "2") { // 查看后20条（更新的消息）
+                sendMsg(fd, "2");
+                recvMsg(fd, reply);
+                if (reply == "less") {
+                    cout << "已经是最新消息，没有更多内容了哦" << endl;
+                    hasNewerMessages = false;
+                    std::cout << "\033[90m输入【1】查看前20条消息，【2】查看后20条消息，【0】返回\033[0m" << std::endl;
+                    continue;
+                }
+                
+                // 接收后20条消息
+                system("clear");
+                string up_str, down_str;
+                recvMsg(fd, up_str);
+                recvMsg(fd, down_str);
+                
+                // 添加错误处理，防止stoi崩溃
+                try {
+                    currentUp = stoi(up_str);
+                    currentDown = stoi(down_str);
+                } catch (const std::invalid_argument& e) {
+                    cout << "接收消息范围失败，返回主菜单" << endl;
+                    cout << "[DEBUG] stoi失败，up_str: '" << up_str << "', down_str: '" << down_str << "'" << endl;
+                    return;
+                } catch (const std::out_of_range& e) {
+                    cout << "消息范围超出范围，返回主菜单" << endl;
+                    return;
+                }
+                hasOlderMessages = true; // 现在有更早的消息了
+                
+                int messageCount = currentUp - currentDown + 1;
+                int displayedCountThisPage = 0;
+                for (int k = 0; k < messageCount; k++) {
+                    int msg_ret = recvMsg(fd, history_message);
+                    if (msg_ret <= 0) {
+                        cout << "接收历史消息失败，停止接收" << endl;
+                        break;
+                    }
+                    if (history_message.empty()) continue;
+                    
+                    try {
+                        history.json_parse(history_message);
+                        if (history.getUsername() == user.getUsername()) {
+                            cout << "你：" << history.getContent() << endl;
+                        } else {
+                            cout << history.getUsername() << "  :  " << history.getContent() << endl;
+                        }
+                        cout << "\t\t\t\t" << history.getTime() << endl;
+                    } catch (const exception& e) {
+                        cout << "解析消息失败，跳过此消息" << endl;
+                        continue;
+                    }
+                }
+                
+                cout << YELLOW << "-------------------以上为群聊历史消息-------------------" << RESET << endl;
+                
+                if (displayedCount < 20) {
+                    hasOlderMessages = false; // 没满，说明到头
+                } else {
+                    hasOlderMessages = true; // 满了，可能还有
+                }   
+
+                // 更新状态信息
+                // hasOlderMessages = true; // 现在有更早的消息了
+                // if (currentDown >= totalCount - 20) {
+                //     hasOlderMessages = false;
+                //  //   cout << "【这是最早的群聊消息】" << endl;
+                // } else {
+                //     hasOlderMessages = true; // 如果currentDown < totalCount - 20，说明还有更早的消息
+                // }
+                // if (currentUp <= 19) {
+                //     hasNewerMessages = false;
+                //   //  cout << "【这是最新的群聊消息】" << endl;
+                // }
+
+                
+                std::cout << "\033[90m输入【1】查看前20条消息，【2】查看后20条消息，【0】返回\033[0m" << std::endl;
+                continue;
+            } else {
+                cout << "输入无效，请输入【1】、【2】或【0】" << endl;
+                continue;
+            }
+        }
     }
 }
-
-
-}
-    //群聊
-//     else{
-//             sendMsg(fd,"G_HISTORY");
-//             // 获取群ID
-//             string group_id = my_groups[who - my_friends.size() - 1].first;
-//             sendMsg(fd, group_id);
-//             cout << "--------------------------------------" << endl;
-//             cout << "【群聊：" << my_groups[who - my_friends.size() - 1].second << "】"<< endl;
-
-//             Message history;
-//             string nums;
-//             // 接收消息数量
-//             int recv_ret = recvMsg(fd, nums);
-//             if (recv_ret <= 0) {
-//                 cout << "接收历史消息数量失败" << endl;
-//                 return;
-//             }
-
-//             int num = stoi(nums);
-//             string history_message;
-//             // 接收并显示初始20条消息
-//             for (int j = 0; j < num; j++) {
-//                 int msg_ret = recvMsg(fd, history_message);
-//                 if (msg_ret <= 0) break;
-//                 history.json_parse(history_message);
-//                 if (history.getUsername() == user.getUsername()) {
-//                     cout << "你：" << history.getContent() << endl;
-//                 } else {
-//                     cout << history.getUsername() << "  :  " << history.getContent() << endl;
-//                 }
-//                 cout << "\t\t\t\t" << history.getTime() << endl;
-//             }
-//             cout << YELLOW << "------------------- 群聊历史消息 -------------------" << RESET << endl;
-
-//             // 群聊消息分页控制（与好友聊天逻辑类似）
-//             std::cout << "\033[90m输入【1】查看前20条【2】查看后20条【0】返回\033[0m" << std::endl;
-//             string order, reply;
-//             while (true) {
-//                 recvMsg(fd, reply);
-//                 if (reply == "less") {
-//                     cout << "已经全部展示完啦！" << endl;
-//                 }
-
-//                 getline(cin, order);
-//                 if (order == "0") {
-//                     sendMsg(fd, "0");
-//                     return;
-//                 } else if (order == "1" || order == "2") {
-//                     sendMsg(fd, order);
-//                     // 接收并显示消息（实现逻辑与好友聊天相同）
-//                     system("clear");
-//                     for (int k = 0; k < 20; k++) {
-//                         int msg_ret = recvMsg(fd, history_message);
-//                         if (msg_ret <= 0) break;
-//                         if (history_message.empty()) continue;
-//                         history.json_parse(history_message);
-//                         // 消息显示逻辑...
-//                     }
-//                 }
-//             }
-//     }
-    
-// }
-
-
-
