@@ -162,6 +162,10 @@ void serverOperation(int fd, User &user) {
         }  else if ( temp == GROUPCHAT ) {
             GroupChat groupChat(fd, user);
             groupChat.startChat();
+        }  else if (temp == "F_HISTORY") {
+            F_history(fd, user);
+        }  else if (temp == "G_HISTORY") {
+           // F_history(fd, user);
         }  else if (temp == DEACTIVATE_ACCOUNT) {
             deactivateAccount(fd, user);
         } else {
@@ -215,6 +219,22 @@ void notify(int fd, const string &UID) {//离线通知
         redis.hdel("group_request_info", UID);  
     }
     
+
+    //注销后群聊解散通知
+     num = redis.scard(UID +"deleteAC_notify");
+     if (num != 0) {
+        redisReply **arr = redis.smembers(UID +"deleteAC_notify");
+        if (arr != nullptr) {
+            for (int i = 0; i < num; i++) {
+                string groupName = arr[i]->str;
+                sendMsg(fd, "deleteAC_notify:" + groupName);
+                msgnum=true;
+                redis.srem(UID +"deleteAC_notify", arr[i]->str);
+                freeReplyObject(arr[i]);
+            }
+        }
+        //redis.hdel("group_request_info", UID);  
+    }
 
     // //入群通知，先不搞了，被踢告知一下就行
     // num = redis.scard("approve" + UID);

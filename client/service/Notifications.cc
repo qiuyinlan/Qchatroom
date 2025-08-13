@@ -86,6 +86,8 @@ void processUnifiedMessage(const string& msg) {
         return;
     }
 
+    
+
     if (msg == "BLOCKED_MESSAGE") {
         string notifyMsg = "系统提示：消息已发出，但被对方拒收了。";
        
@@ -114,6 +116,17 @@ void processUnifiedMessage(const string& msg) {
             cout << notifyMsg << endl;
             return;
     }
+
+    
+    else if ( msg.find("deleteAC_notify:") == 0) {
+        string groupName = msg.substr(16);
+        string notifyMsg = "群聊[" + groupName + "]的群主已注销，群聊已解散";
+    
+            cout << RED <<notifyMsg <<RESET << endl;
+            return;
+    }
+
+
     else if ( msg.find("REMOVE:") == 0) {
         string groupName = msg.substr(7);
         string notifyMsg = "你被移除群聊[" + groupName + "]";
@@ -210,6 +223,7 @@ void heartbeat(string UID) {
     Connect(fd, IP, PORT);
 
     sendMsg(fd, "HEARTBEAT");
+    sendMsg(fd,UID);
    
     while (true) {
         this_thread::sleep_for(chrono::seconds(30));  // 秒检测一次

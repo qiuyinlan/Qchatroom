@@ -20,7 +20,8 @@ void operationMenu() {
     cout << "[1]开始聊天                  [2]添加好友" << endl;
     cout << "[3]查看添加好友请求          [4]删除好友" << endl;
     cout << "[5]屏蔽好友                  [6]解除屏蔽" << endl;
-    cout << "[7]群聊                      [8]注销账户" << endl;
+    cout << "[7]群聊                      [8]查看历史记录" << endl;
+    cout << "[9]注销账户" << endl;
     cout << "按[0]退出登陆" << endl;
     cout << BLUE << "请输入你的选择" << RESET << endl;
 }
@@ -152,6 +153,12 @@ void clientOperation(int fd, User &user) {
         } else if (opt == 7) {
             gChat.groupctrl(my_friends);
         } else if (opt == 8) {
+            vector<Group> joinedGroup;
+            G_chat gChat(fd, user);
+            gChat.syncGL(joinedGroup);
+                // 调用统一history界面
+            chatSession.history(my_friends, joinedGroup);
+        } else if (opt == 9) {
             deactivateAccount(fd, user);
             return;
         } else {
@@ -162,6 +169,13 @@ void clientOperation(int fd, User &user) {
 
 // 注销账户
 void deactivateAccount(int fd, User &user) {
+    
+//     string num_str;
+//    recvMsg(fd,num_str);
+//    if(num_str == "0"){
+
+//    }
+
     cout << "\n=== 账户注销 ===" << endl;
     cout << "警告：注销后您将无法再次使用此用户名，也无法使用此邮箱登录！" << endl;
     cout << "您的账户信息将被保留，但无法接收消息与登陆。" << endl;

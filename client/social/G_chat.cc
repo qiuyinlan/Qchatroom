@@ -143,6 +143,7 @@ void G_chat::syncGL(std::vector<Group> &joinedGroup) {
 
 
 void G_chat::sync(vector<Group> &createdGroup, vector<Group> &managedGroup, vector<Group> &joinedGroup) const {
+    //sendMsg(fd,"sync");
     createdGroup.clear();
     managedGroup.clear();
     joinedGroup.clear();

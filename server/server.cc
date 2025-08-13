@@ -44,6 +44,7 @@ void hearbeat(int epfd,int fd){
     int receiver_fd;
     string UID;
    
+    recvMsg(fd,UID);
     // 给 socket 设置了接收数据的最大阻塞时间为  秒
     struct timeval timeout;
     timeout.tv_sec = 40;//s

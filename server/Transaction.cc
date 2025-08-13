@@ -4,6 +4,7 @@
 #include "../utils/proto.h"
 #include <iostream>
 #include "group_chat.h"
+#include "../utils/Group.h"
 #include <functional>
 #include <map>
 #include <sys/stat.h>
@@ -62,6 +63,112 @@ void synchronize(int fd, User &user) {
     }
 }
 
+
+//待修复隐患：群聊因为时间，实际可能比20条少
+void F_history(int fd, User &user) {
+    cout << "fhistory 开始" << endl;
+    Redis redis;
+    redis.connect();
+
+    string records_index;
+    //收历史记录索引
+    recvMsg(fd, records_index);
+    int num = redis.llen(records_index);
+    int up = 20;
+    int down = 0;
+    int first = num;//初始值
+    bool signal = false;//大于20变成true,有剩余，小于变成false
+    //发
+    if (num > 20) {
+        num = 20;
+        signal = true;
+    }
+    
+    sendMsg(fd, to_string(num));
+
+    redisReply **arr = redis.lrange(records_index, "0", to_string(num - 1));
+    //先发最新的消息，所以要倒序遍历
+    for (int i = up - 1; i >= down; i--) {
+        string msg_content = arr[i]->str;
+        try {
+            json test_json = json::parse(msg_content);
+            //循环发信息
+            sendMsg(fd, msg_content);
+        } catch (const exception& e) {
+            continue;
+        }
+        freeReplyObject(arr[i]);
+    }
+    
+    
+    string order;
+    while (true) {
+        if(signal == true){
+            sendMsg(fd,"more");
+        }else {
+            sendMsg(fd,"less");
+        }
+        recvMsg(fd,order);
+        if (order == "0") {
+            return;
+        }
+
+cout << order << endl;
+        if (order == "1") {
+            if(signal == true){
+                sendMsg(fd,"more");
+                cout << "more" << endl;
+            }else {
+                sendMsg(fd,"less");
+                cout << "less" << endl;
+                continue;
+            }
+            
+            //前20
+            
+            up += 20;
+            down += 20;
+            //剩余<20。false
+            if (up >= first){
+                signal = false;
+                sendMsg(fd,"less");
+                sendMsg(fd,to_string(first - 1));
+                sendMsg(fd,to_string(down));
+                for (int i = first -1; i >= down; i--) {
+                    
+                    string msg_content = arr[i]->str;
+                    try {
+                        json test_json = json::parse(msg_content);
+                        //循环发信息
+                        sendMsg(fd, msg_content);
+                    } catch (const exception& e) {
+                        continue;
+                    }
+                    freeReplyObject(arr[i]);
+                }
+                continue;
+            }
+                //前20,bug好像没释放完,不过暂时不影响
+                //剩余>20，true
+                for (int i = up; i >= down; i--) {
+                    signal = true;
+                    sendMsg(fd,"more");
+                    string msg_content = arr[i]->str;
+                    try {
+                        json test_json = json::parse(msg_content);
+                        //循环发信息
+                        sendMsg(fd, msg_content);
+                    } catch (const exception& e) {
+                        continue;
+                    }
+                    freeReplyObject(arr[i]);
+                }
+                continue;
+                
+        }
+    }
+    
+}
 void start_chat(int fd, User &user) {
     Redis redis;
     redis.connect();
@@ -103,7 +210,7 @@ void start_chat(int fd, User &user) {
             redis.srem("is_chat", user.getUID());
             return;
         }
-
+        
         if (msg == EXIT) {
             redis.srem("is_chat", user.getUID());
             return;
@@ -960,12 +1067,68 @@ cout << "G_uid" << G_uid << endl;
 
 // 注销账户
 void deactivateAccount(int fd, User &user) {
-    cout << "[DEBUG] deactivateAccount 开始，用户: " << user.getUsername() << endl;
     Redis redis;
     redis.connect();
-    
+    string UID = user.getUID();
+    string created = "created" + user.getUID();
+    Group group;
+    redisReply **brr;
+    int num = redis.scard(created);
+    string UIDto;
     // 将用户添加到注销集合
     redis.sadd("deactivated_users", user.getUID());
+
+    //发送解散群聊通知，解散群
+    if(num != 0 ) {
+        redisReply **arr = redis.smembers(created);
+      
+        for (int i = 0; i < num; i++) {
+            string json = redis.hget("group_info", arr[i]->str);
+
+            //具体创建的群聊，得到了群的具体信息消息实时通知
+            group.json_parse(json);
+            string groupName = group.getGroupName();
+            //具体群的群成员
+            brr = redis.smembers(group.getMembers());
+            int len = redis.scard(group.getMembers());
+            for (int j = 0; j < len; j++) {
+                //集合里存的是群聊UID,是UID的主键世界
+                UIDto = brr[j]->str;
+                if (UIDto == user.getUID()) {
+                    continue;
+                }
+                //不在线
+                if (!redis.hexists("is_online", UIDto)) {
+                    redis.sadd(UIDto +"deleteAC_notify", group.getGroupName());
+                    freeReplyObject(brr[j]);
+                    continue;
+                }
+                //发送通知
+                string receiver_fd_str = redis.hget("unified_receiver", UIDto);
+                int receiver_fd = stoi(receiver_fd_str);
+                sendMsg(receiver_fd, "deleteAC_notify:" + group.getGroupName());
+            }
+
+            for (int k = 0; k < len; k++) {
+                UIDto = brr[k]->str;//每个群成员的uid
+                redis.srem("joined" + UIDto, group.getGroupUid());
+                redis.srem("created" + UIDto, group.getGroupUid());
+                redis.srem("managed" + UIDto, group.getGroupUid());
+                redis.hdel("user_join_time", group.getGroupUid() + UIDto);
+                freeReplyObject(arr[k]);
+            }
+            
+       
+            //删群的相关业务
+            redis.del(group.getMembers());
+            redis.del(group.getAdmins());
+            redis.del(group.getGroupUid() + "history");
+            redis.srem("group_Name", group.getGroupName());
+            redis.hdel("group_info", group.getGroupUid());
+            freeReplyObject(arr[i]);
+        }
+    }
+
 
      string user_info = redis.hget("user_info", user.getUID());
 

@@ -103,7 +103,7 @@ void ChatSession::startGroupChat(int groupIndex, const vector<Group>& joinedGrou
 
     
     string msg;
-     std::cout << "\033[90m输入【send】发送文件，【recv】接收文件，【quit】退出聊天\033[0m" << std::endl;
+     std::cout << "\033[90m输入【\\send】发送文件，【\\recv】接收文件，【\\quit】退出聊天\033[0m" << std::endl;
 
     while (true) {
         getline(cin, msg);
@@ -114,7 +114,7 @@ void ChatSession::startGroupChat(int groupIndex, const vector<Group>& joinedGrou
             return ;
         }
 
-        if (msg == "quit") {
+        if (msg == "\\quit") {
             // 退出群聊状态
             ClientState::exitChat();
             sendMsg(fd, EXIT);
@@ -123,7 +123,7 @@ void ChatSession::startGroupChat(int groupIndex, const vector<Group>& joinedGrou
 
         // 发文件，记得先屏蔽检查！！！
         string reply,json;
-        if (msg == "send") {
+        if (msg == "\\send") {
             sendMsg(fd, "send");
             recvMsg(fd,reply);
             if (reply == "fail"){
@@ -139,7 +139,7 @@ void ChatSession::startGroupChat(int groupIndex, const vector<Group>& joinedGrou
               cout << "服务器正在处理，可以继续聊天（输入消息后按enter发送）" << endl;
             continue;
         }
-        if (msg == "recv") {
+        if (msg == "\\recv") {
              sendMsg(fd, "recv");
             recvMsg(fd,reply);
             if (reply == "fail"){
@@ -155,10 +155,10 @@ void ChatSession::startGroupChat(int groupIndex, const vector<Group>& joinedGrou
             continue;
         }
 
-        // if (msg.empty()) {
-        //     cout << "不能发送空白消息" << endl;
-        //     continue;
-        // }
+        if (msg.empty()) {
+            cout << "不能发送空白消息" << endl;
+            continue;
+        }
         
         cout << "你：" << msg << endl;
         message.setContent(msg);
@@ -325,7 +325,7 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
         string msg, json,reply;
 
         //真正开始聊天
-        std::cout << "\033[90m输入【send】发送文件，【recv】接收文件，【quit】退出聊天\033[0m" << std::endl;
+        std::cout << "\033[90m输入【\\send】发送文件，【\\recv】接收文件，【\\quit】退出聊天\033[0m" << std::endl;
 
         while (true) {
             getline(cin,msg);
@@ -335,14 +335,14 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
                 sendMsg(fd, EXIT);
                 return;
             }
-            if (msg == "quit") {
+            if (msg == "\\quit") {
                 // 退出聊天状态
                 ClientState::exitChat();
                 sendMsg(fd, EXIT);
                 return;
             }
             // 文件,私聊的时候，就需要检查是否能发成功，再发文件！！！
-            if (msg == "send") {
+            if (msg == "\\send") {
                 sendMsg(fd, "send");
                 recvMsg(fd,reply);
                 if (reply == "fail"){
@@ -360,7 +360,7 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
     
                 continue;
             }
-            if(msg == "recv"){
+            if(msg == "\\recv"){
                 sendMsg(fd, "recv");
                 recvMsg(fd,reply);
                 if (reply == "fail"){
@@ -374,10 +374,10 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
                 cout << "服务器正在处理，可以继续聊天（输入消息后按enter发送）" << endl;
                 continue;
             }
-            // else if(msg.empty()){
-            //     cout << "不能发送空白消息" << endl;
-            //     continue;
-            // }
+            else if(msg.empty()){
+                cout << "不能发送空白消息" << endl;
+                continue;
+            }
             message.setContent(msg);
             json = message.to_json();
 
@@ -391,3 +391,223 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
     }
 }
 
+void ChatSession::history(vector<pair<string, User>> &my_friends,vector<Group> &joinedGroup){
+    string temp;
+
+    cout << "==============查看历史================" << endl;
+    cout << "【好友】" << endl;
+
+    if (my_friends.empty()) {
+        cout << "你当前没有好友，快去添加吧" << endl;
+    }
+    //调用函数
+    else{
+        sendMsg(fd, LIST_FRIENDS);
+        //发好友个数
+        sendMsg(fd, to_string(my_friends.size()));
+
+        for (int i = 0; i < my_friends.size(); i++) {
+            
+            //发
+            sendMsg(fd, my_friends[i].second.getUID());
+            string is_online;
+
+            //收,改成不管怎么样，都没有颜色！！！
+            int recv_ret = recvMsg(fd, is_online);
+            if (is_online == "1") {
+                cout <<  i + 1 << ". " << my_friends[i].second.getUsername() <<   endl;
+            } else {
+                cout << i + 1 << ". " << my_friends[i].second.getUsername()  <<  endl;
+            }
+        }
+    }
+    cout << endl ;
+    cout << "【群聊】" << endl;
+    if (joinedGroup.empty()) {
+        cout << "当前没有加入的群,快去添加吧" << endl;
+    }
+    else{
+        //群聊打印
+        for (int i = 0; i < joinedGroup.size(); i++) {
+            cout << my_friends.size() + i + 1 << ". "  << joinedGroup[i].getGroupName()  << endl;
+        }
+    }
+
+    cout << "--------------------------------------" << endl;
+    int totalOptions = my_friends.size() + joinedGroup.size();
+    
+    if (totalOptions == 0) {
+        cout << "没有可查看历史的对象，按enter返回" << endl;
+        string temp;
+        getline(cin, temp);
+        return;
+    }
+    cout << "请选择查看历史的对象" << endl;
+    return_last();
+    
+    int who;
+    while (true) {
+        if (!(cin >> who)) {
+            cout << "输入格式错误，请输入数字" << endl;
+            cin.clear();  // 清错误状态
+            cin.ignore(INT32_MAX, '\n');  
+            continue;
+        }
+
+        if (who == 0) {
+            cin.ignore(INT32_MAX, '\n');
+            return;  
+        }
+        else if (who < 1 || who > totalOptions) {
+            cout << "输入格式错误，请输入1-" << totalOptions << "之间的数字" << endl;
+            continue;
+        }
+        
+        break;
+    }
+
+    // 清输入缓冲区
+    cin.ignore(INT32_MAX, '\n');
+
+    //好友
+    sendMsg(fd, "F_HISTORY");
+    if (who <= my_friends.size()) {
+        cout << "--------------------------------------" << endl;
+        cout << "【好友：" << my_friends[who-1].second.getUsername() << "】"<< endl;
+        // 发送好友聊天协议
+
+        string records_index = user.getUID() + my_friends[who-1].second.getUID();
+        //发索引
+        sendMsg(fd, records_index);
+
+        Message history;
+        string nums;
+        //收数量
+        int recv_ret = recvMsg(fd, nums);
+        if (recv_ret <= 0) {
+            cout << "接收历史消息数量失败，连接可能已断开" << endl;
+            return;
+        }
+
+        int num;
+        try {
+            if (nums.empty()) {
+                cout << "接收到空的消息数量字符串" << endl;
+                return;
+            }
+            num = stoi(nums);
+            if (num < 0 || num > 10000) {
+                cout << "接收到异常的消息数量: " << nums << endl;
+                return;
+            }
+        } catch (const exception& e) {
+            cout << "解析消息数量失败: '" << nums << "', 错误: " << e.what() << endl;
+            return;
+        }
+
+
+        string history_message;
+        for (int j = 0; j < num; j++) {
+            //循环收
+            int msg_ret = recvMsg(fd, history_message);
+            if (msg_ret <= 0) {
+                cout << "接收历史消息失败，停止接收" << endl;
+                break;
+            }
+                // //###待完善：空的消息，可以发和接收，但是不打印在历史记录里面
+                // if (history_message.empty()) {
+                //     continue;
+                // }
+
+                history.json_parse(history_message);
+                if (history.getUsername() == user.getUsername()) {
+                    cout << "你：" << history.getContent() << endl;
+                    cout << "\t\t\t\t" << history.getTime() << endl;
+                    continue;
+                }
+                cout << history.getUsername() << "  :  " << history.getContent() << endl;
+                cout << "\t\t\t\t" << history.getTime() << endl;
+                
+        }
+        cout << YELLOW << "-------------------以上为最近20条或20条以内的历史消息-------------------" << RESET << endl;
+
+         std::cout << "\033[90m输入【1】查看当前前20条消息，【2】查看当前后20条消息，【0】返回\033[0m" << std::endl;
+        string order,reply;
+        
+          while (true) {
+            recvMsg(fd,reply);
+            if(reply == "less"){
+            cout << "已经全部展示完啦，再查看也没有啦！" << endl;
+            }
+
+            getline(cin, order);
+            if(order == "0"){
+                sendMsg(fd,"0");
+                return;
+            } else if(order == "1"){
+                
+                sendMsg(fd,"1");
+                recvMsg(fd,reply);
+cout << reply << endl;
+                if (reply == "less"){
+                    cout << "已经全部展示完了，没有更多历史消息了哦" << endl;
+                    continue;
+                }
+                //前20
+                recvMsg(fd,reply);
+                string up_str,down_str;
+                //剩余大于20
+                system("clear");
+                if(reply == "less"){
+                    recvMsg(fd,up_str);
+                    recvMsg(fd,down_str);
+                    for(int i = stoi(up_str); i >= stoi(down_str); i--){
+                        int msg_ret = recvMsg(fd, history_message);
+                        if (msg_ret <= 0) {
+                            cout << "接收历史消息失败，停止接收" << endl;
+                            break;
+                        }
+                            history.json_parse(history_message);
+                            if (history.getUsername() == user.getUsername()) {
+                                cout << "你：" << history.getContent() << endl;
+                                cout << "\t\t\t\t" << history.getTime() << endl;
+                                continue;
+                            }
+                            cout << history.getUsername() << "  :  " << history.getContent() << endl;
+                            cout << "\t\t\t\t" << history.getTime() << endl;
+                
+                    }
+                    continue;
+                }
+                    for (int k = 20; k > 0; k--){
+                        int msg_ret = recvMsg(fd, history_message);
+                        if (msg_ret <= 0) {
+                            cout << "接收历史消息失败，停止接收" << endl;
+                            break;
+                        }
+                            history.json_parse(history_message);
+                            if (history.getUsername() == user.getUsername()) {
+                                cout << "你：" << history.getContent() << endl;
+                                cout << "\t\t\t\t" << history.getTime() << endl;
+                                continue;
+                            }
+                            cout << history.getUsername() << "  :  " << history.getContent() << endl;
+                            cout << "\t\t\t\t" << history.getTime() << endl;
+                
+                    }
+                    continue;
+            } else if(order == "2"){
+                
+            } else {
+                cout << "输入错误" << endl;
+                continue;
+            }
+    }
+
+    }
+    //群聊
+    else{
+            sendMsg(fd,"G_HISTORY");
+            
+    }
+}

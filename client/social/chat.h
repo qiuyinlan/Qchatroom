@@ -11,7 +11,7 @@ class ChatSession {
 public:
     ChatSession(int fd, User user);
     void startChat(vector<pair<string, User>> &my_friends,vector<Group> &joinedGroup);
-   
+    void history(vector<pair<string, User>> &my_friends,vector<Group> &joinedGroup);
 private:
    
     int fd;

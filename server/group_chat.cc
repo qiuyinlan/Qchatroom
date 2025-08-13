@@ -21,7 +21,9 @@ void GroupChat::group(int fd, User &user) {
     string choice;
     
     int ret;
+    string reply;
     while (true) {
+       // recvMsg(fd,reply);
         groupChat.sync();
         std::cout << "[DEBUG] 等待接收客户端选择..." << std::endl;
         ret = recvMsg(fd, choice);
@@ -112,11 +114,11 @@ void GroupChat::synchronizeGL(int fd, User &user) {
 
 //同步群数量
 void GroupChat::sync() {
+    
     Redis redis;
     redis.connect();
+    //发送创建的群数量
     int num = redis.scard(created);
-
-    //发送群数量
     int ret = sendMsg(fd, to_string(num));
     if (ret <= 0) {
         std::cerr << "[ERROR] 同步创建群数量sendMsg() 失败" << std::endl;
@@ -686,12 +688,14 @@ void GroupChat::deleteGroup(Group &group) {
         redis.srem("joined" + UID, group.getGroupUid());
         redis.srem("created" + UID, group.getGroupUid());
         redis.srem("managed" + UID, group.getGroupUid());
+        redis.hdel("user_join_time", group.getGroupUid() + UID);
         freeReplyObject(arr[i]);
     }
     redis.del(group.getMembers());
     redis.del(group.getAdmins());
     redis.del(group.getGroupUid() + "history");
     redis.srem("group_Name", group.getGroupName());
+    redis.hdel("group_info", group.getGroupUid());
 
  }
 
