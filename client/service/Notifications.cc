@@ -242,7 +242,7 @@ void heartbeat(string UID) {
     sendMsg(fd, UID);
    
     while (true) {
-        this_thread::sleep_for(chrono::seconds(30));  // 秒检测一次
+        this_thread::sleep_for(chrono::seconds(10));  // 秒检测一次
 
         // 发送心跳包
         if (sendMsg(fd, "HEARTBEAT") <= 0) {

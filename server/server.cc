@@ -50,7 +50,7 @@ void hearbeat(int epfd, int fd) {
 
     // 设置阻塞读超时 40s
     struct timeval timeout;
-    timeout.tv_sec = 40;
+    timeout.tv_sec = 20;
     timeout.tv_usec = 0;
     if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
         perror("setsockopt SO_RCVTIMEO failed");
