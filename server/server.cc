@@ -20,11 +20,12 @@
 #include <unordered_set>
 #include <mutex>
 #include <random>
+#include <unordered_map>
+#include <ctime>
 #include "../utils/IO.h"
 
 using namespace std;
 
-// 显式声明，，避免链接问题
 extern int sendMsg(int fd, std::string msg);
 extern int recvMsg(int fd, std::string &msg);
 
@@ -32,8 +33,81 @@ extern int recvMsg(int fd, std::string &msg);
 unordered_set<int> waiting_for_json;
 mutex waiting_mutex;
 
+// 心跳，因为fd值会被复用，所以一定要引入uid,用户唯一标识
+unordered_map<string, time_t> last_activity;  // 记最后活跃
+unordered_map<int, string> fd_to_uid;         // fd到uid的映射
+mutex activity_mutex;  
 
 
+// 更新uid活跃时间
+void updateUserActivity(const string& uid) {
+    lock_guard<mutex> lock(activity_mutex);
+    last_activity[uid] = time(nullptr);
+}
+
+// 添加fd到uid的映射，写成单独函数，可以更好地控制锁
+void addFdToUid(int fd, const string& uid) {
+    lock_guard<mutex> lock(activity_mutex);
+    fd_to_uid[fd] = uid;
+    last_activity[uid] = time(nullptr);//unix时间戳
+    cout << "[心跳]  fd=" << fd << " -> uid=" << uid << endl;
+}
+
+// fd--uid
+string getUidByFd(int fd) {
+    lock_guard<mutex> lock(activity_mutex);
+    auto it = fd_to_uid.find(fd);
+    return (it != fd_to_uid.end()) ? it->second : "";
+}
+
+// 检查心跳超时
+void checkHeartbeatTimeout() {
+    lock_guard<mutex> lock(activity_mutex);
+    time_t now = time(nullptr);
+    Redis redis;
+    redis.connect();
+
+    for (auto it = last_activity.begin(); it != last_activity.end();) {
+        if (now - it->second > 60) {  // 秒超时
+            cout << "[心跳超时] 用户 " << it->first << " 超时，清理状态" << endl;
+
+            // 清理用户状态
+            redis.hdel("is_online", it->first);
+            redis.hdel("unified_receiver", it->first);
+
+            it = last_activity.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+// 移除用户活跃记录
+void removeUserActivity(const string& uid) {
+    lock_guard<mutex> lock(activity_mutex);
+    last_activity.erase(uid);
+
+    // 同时移除fd映射
+    for (auto it = fd_to_uid.begin(); it != fd_to_uid.end();) {
+        if (it->second == uid) {
+            cout << "[心跳] 移除映射 fd=" << it->first << " -> uid=" << uid << endl;
+            it = fd_to_uid.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    cout << "[心跳] 移除用户 " << uid << " 活跃记录" << endl;
+}
+
+// 根据fd移除映射
+void removeFdMapping(int fd) {
+    lock_guard<mutex> lock(activity_mutex);
+    auto it = fd_to_uid.find(fd);
+    if (it != fd_to_uid.end()) {
+        cout << "[心跳] 移除映射 fd=" << fd << " -> uid=" << it->second << endl;
+        fd_to_uid.erase(it);
+    }
+}
 
 void signalHandler(int signum) {
     
@@ -50,84 +124,7 @@ void signalHandler(int signum) {
     
 }
 
-//超时，映射
-
-void hearbeat(int epfd, int fd) {
-    Redis redis;
-    redis.connect();
-
-    // 将心跳连接切换为阻塞，才能正确依赖 SO_RCVTIMEO
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags != -1) {
-        fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
-    }
-
-    // 设置阻塞读超时 40s
-    struct timeval timeout;
-    timeout.tv_sec = 20;
-    timeout.tv_usec = 0;
-    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
-        perror("setsockopt SO_RCVTIMEO failed");
-    }
-
-    // 先接收客户端UID（阻塞版）
-    string uid;
-    if (recvMsg(fd, uid) <= 0) {
-        cout << "[ERROR] 接收心跳UID失败，关闭连接" << endl;
-        epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
-        close(fd);
-        return;
-    }
-
-    while (true) {
-        string buf;
-        int len = recvMsg(fd, buf); // 阻塞读取，受 SO_RCVTIMEO 影响
-        if (len <= 0) {
-            // 超时或连接断开，进行清理
-            cout << "[INFO] 心跳连接异常/超时，uid=" << uid << "，关闭连接" << endl;
-
-            // 关闭对应的统一接收连接（若存在且合法）
-            string data_fd_str = redis.hget("unified_receiver", uid);
-            bool ok_num = !data_fd_str.empty() && all_of(data_fd_str.begin(), data_fd_str.end(), ::isdigit);
-            if (ok_num) {
-                int data_fd = stoi(data_fd_str);
-                
-                cout << "[清理] 关闭统一接收连接 fd=" << data_fd << endl;
-                epoll_ctl(epfd, EPOLL_CTL_DEL, data_fd, nullptr);
-                close(data_fd);
-                redis.hdel("unified_receiver", uid);
-            } else {
-                cout << "[WARN] 未找到统一接收连接或值非法，uid=" << uid << endl;
-            }
-
-            redis.hdel("is_online", uid);
-            break;
-        }
-
-        if (buf == "HEARTBEAT") {
-            // 发送心跳响应（阻塞）
-            if (sendMsg(fd, "HEARTBEAT_ACK") < 0) {
-                cout << "[ERROR] 心跳响应发送失败，uid=" << uid << endl;
-
-                // 同样清理统一接收连接
-                string data_fd_str = redis.hget("unified_receiver", uid);
-                bool ok_num = !data_fd_str.empty() && all_of(data_fd_str.begin(), data_fd_str.end(), ::isdigit);
-                if (ok_num) {
-                    int data_fd = stoi(data_fd_str);
-                    cout << "[清理] 关闭统一接收连接 fd=" << data_fd << endl;
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, data_fd, nullptr);
-                    close(data_fd);
-                    redis.hdel("unified_receiver", uid);
-                }
-                redis.hdel("is_online", uid);
-                break;
-            }
-        }
-    }
-
-    epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
-    close(fd);
-}
+// 旧的心跳函数已删除，心跳功能现在集成在统一接收连接中
 
 
 int main(int argc, char *argv[]) {
@@ -189,16 +186,31 @@ int main(int argc, char *argv[]) {
     epoll_ctl(epfd, EPOLL_CTL_ADD, listenfd, &temp);
     
 
+    // 记录上次检查心跳的时间
+    time_t last_heartbeat_check = time(nullptr);
+
     while (true) {
-        ret = epoll_wait(epfd, ep, 1024, -1);
+        // 使用超时的epoll_wait，每5秒检查一次心跳
+        ret = epoll_wait(epfd, ep, 1024, 30000);  // 5秒超时
+
+        // 检查心跳
+        time_t now = time(nullptr);
+        if (now - last_heartbeat_check >= 30) {  
+            checkHeartbeatTimeout();
+            last_heartbeat_check = now;
+        }
+
+        //超时，无事件
+        if (ret == 0) {
+            continue;
+        }
         for (int i = 0; i < ret; i++) {
             //如果不是读事件，继续循环
             if (!(ep[i].events & EPOLLIN))
                 continue;
 
             int fd = ep[i].data.fd;
-
-            //listenfd变成可读状态，代表有新客户端连接上来了
+            
             //listenfd变成可读状态，代表有新客户端连接上来了
             if (fd == listenfd) {
                 //循环一定要有退出的判断EAGAIN
@@ -254,26 +266,49 @@ int main(int argc, char *argv[]) {
                 msg.clear();
                 while (true) {
                     int recv_ret = recvMsgET(fd, msg);
-                    cout << "[DEBUG] recvMsg返回值: " << recv_ret << ", 消息内容: '" << msg << "'" << endl;
+                   // cout << "[DEBUG] recvMsg返回值: " << recv_ret << ", 消息内容: '" << msg << "'" << endl;
 
                     if (recv_ret == -2) {
                         // 说明数据还没读完，ET模式下需要等待下次EPOLLIN事件
                         // 不要继续循环，直接退出等待更多数据
-                        cout << "[DEBUG] 数据不完整，等待下次事件" << endl;
+                       // cout << "[DEBUG] 数据不完整，等待下次事件" << endl;
                         break;
                     }
                     else if (recv_ret == 0) {
                         // 连接关闭，退出循环，清理资源
                         cout << "[INFO] 客户端 " << fd << " 断开连接" << endl;
-                        redis.hdel("is_online", to_string(fd));
-                        redis.hdel("unified_receiver", to_string(fd));
+
+                        // 获取对应的uid并清理
+                        string uid = getUidByFd(fd);
+                        if (!uid.empty()) {
+                            redis.hdel("is_online", uid);
+                            redis.hdel("unified_receiver", uid);
+                            removeUserActivity(uid);
+                        }
+
+                        removeFdMapping(fd);
                         epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
                         close(fd);
                         break;
                     }
                     else if (recv_ret > 0) {
-                        cout << "[DEBUG] 收到完整消息: " << msg << ", 长度: " << recv_ret << endl;
-                        
+                        //cout << "[DEBUG] 收到完整消息: " << msg << ", 长度: " << recv_ret << endl;
+
+                        // 首先检查是否是统一接收连接的心跳消息
+                        if (msg == "HEARTBEAT") {
+                            string uid_for_heartbeat = getUidByFd(fd);
+
+                            cout << "[心跳] 收到心跳消息，fd=" << fd << ", uid=" << uid_for_heartbeat << endl;
+                           // sendMsg(fd, "HEARTBEAT_ACK");
+
+                            // 更新活跃时间
+                            if (!uid_for_heartbeat.empty()) {
+                                updateUserActivity(uid_for_heartbeat);
+                                //notify(fd, uid_for_heartbeat);
+                            }
+                            continue;
+                        }
+
                         //切换成阻塞模式
                         // 首先检查JSON登录数据
                         bool is_waiting_for_json = false;
@@ -295,7 +330,6 @@ int main(int argc, char *argv[]) {
                             break;
                         }
                         else if (msg == LOGIN) {
-                            cout << "[DEBUG] 收到LOGIN协议，移交给线程池处理" << endl;
                             epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
                             clearBuffers(fd);
 
@@ -311,20 +345,15 @@ int main(int argc, char *argv[]) {
                             break;
                         }
                         //额外的连接
-                        else if (msg == "HEARTBEAT") {
-                            epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                            pool.addTask([=](){
-                                hearbeat(epfd, fd);
-                            });
-                            break;
-                        } else if (msg == UNIFIED_RECEIVER) {
-                            // 保持非阻塞模式，继续走ET读写
+
+                        //1.通知和心跳
+                        else if (msg == UNIFIED_RECEIVER) {
                             epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
                             pool.addTask([=](){ handleUnifiedReceiver(epfd, fd); });
                             break;
                         } else if (msg == SENDFILE_F) {
                             epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                            // 文件传输处理使用阻塞IO
+                            // 阻塞IO
                             int _flags = fcntl(fd, F_GETFL, 0);
                             if (_flags != -1) {
                                 fcntl(fd, F_SETFL, _flags & ~O_NONBLOCK);
@@ -333,7 +362,7 @@ int main(int argc, char *argv[]) {
                             break;
                         } else if (msg == RECVFILE_F) {
                             epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                            // 文件传输处理使用阻塞IO
+        
                             int _flags = fcntl(fd, F_GETFL, 0);
                             if (_flags != -1) {
                                 fcntl(fd, F_SETFL, _flags & ~O_NONBLOCK);
@@ -342,7 +371,6 @@ int main(int argc, char *argv[]) {
                             break;
                         } else if (msg == SENDFILE_G) {
                             epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                            // 文件传输处理使用阻塞IO
                             int _flags = fcntl(fd, F_GETFL, 0);
                             if (_flags != -1) {
                                 fcntl(fd, F_SETFL, _flags & ~O_NONBLOCK);
@@ -362,7 +390,6 @@ int main(int argc, char *argv[]) {
                         //正常请求
                         else if (msg == REQUEST_CODE) {
                             epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);//发验证码，发前检查邮箱
-                            // 此分支内部使用阻塞IO
                             int _flags = fcntl(fd, F_GETFL, 0);
                             if (_flags != -1) {
                                 fcntl(fd, F_SETFL, _flags & ~O_NONBLOCK);
@@ -371,7 +398,6 @@ int main(int argc, char *argv[]) {
                             break;
                         } else if (msg == REGISTER_WITH_CODE) {
                             epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                            // 此分支内部使用阻塞IO
                             int _flags = fcntl(fd, F_GETFL, 0);
                             if (_flags != -1) {
                                 fcntl(fd, F_SETFL, _flags & ~O_NONBLOCK);
@@ -380,7 +406,6 @@ int main(int argc, char *argv[]) {
                             break;
                         } else if (msg == REQUEST_RESET_CODE) {
                             epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                            // 此分支内部使用阻塞IO
                             int _flags = fcntl(fd, F_GETFL, 0);
                             if (_flags != -1) {
                                 fcntl(fd, F_SETFL, _flags & ~O_NONBLOCK);
@@ -389,7 +414,6 @@ int main(int argc, char *argv[]) {
                             break;
                         } else if (msg == RESET_PASSWORD_WITH_CODE) {
                             epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                            // 此分支内部使用阻塞IO
                             int _flags = fcntl(fd, F_GETFL, 0);
                             if (_flags != -1) {
                                 fcntl(fd, F_SETFL, _flags & ~O_NONBLOCK);
@@ -398,7 +422,6 @@ int main(int argc, char *argv[]) {
                             break;
                         } else if (msg == FIND_PASSWORD_WITH_CODE) {
                             epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                            // 此分支内部使用阻塞IO
                             int _flags = fcntl(fd, F_GETFL, 0);
                             if (_flags != -1) {
                                 fcntl(fd, F_SETFL, _flags & ~O_NONBLOCK);
@@ -411,7 +434,7 @@ int main(int argc, char *argv[]) {
                         }
                         continue;
                     }
-                 else {
+                    else {
                         // 出错（recv_ret < 0 且不是 -2）
                         cerr << "[ERROR] recvMsgET error fd=" << fd << ", ret=" << recv_ret << endl;
                         epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);

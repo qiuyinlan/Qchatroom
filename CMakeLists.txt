@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.10)
 
 project(MessengerRebuild CXX)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -g")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,6 +25,7 @@ add_executable(
         server/LoginHandler.cc
         server/Transaction.cc
         server/Redis.cc
+        server/MySQL.cc
         server/group_chat.cc
         server/Threadpool.cpp
         server/tool.cc
@@ -62,6 +62,7 @@ target_link_libraries(
         server.out PRIVATE curl
         nlohmann_json::nlohmann_json
         hiredis
+        mysqlclient
 )
 
 target_link_libraries(

@@ -19,11 +19,10 @@ bool Redis::connect() {
         } else {
             cout << "Redis connection error: can't allocate redis context (null context)" << endl;
         }
-        // 如果连接失败，打印错误信息后，立即返回 false
-        return false; // <--- 关键的修改点，确保返回 false
+        return false; 
     } else {
         
-        return true; // <--- 连接成功时返回 true
+        return true; 
     }
 }
 
@@ -46,7 +45,7 @@ bool Redis::sadd(const std::string &key, const std::string &value) {
 bool Redis::sismember(const string &key, const string &value) {
     string command = "SISMEMBER " + key + " " + value;
     reply = static_cast<redisReply *>(redisCommand(context, command.c_str()));
-    bool is_member = reply->integer > 0;
+    bool is_member = reply->integer > 0;//是集合返回1,不是返回0，与0比——bool
     freeReplyObject(reply);
     return is_member;
 }
@@ -158,12 +157,6 @@ void Redis::lpush(const string &key, const string &value) {
     if (reply->type == REDIS_REPLY_ERROR) {
         cout << "[REDIS ERROR] LPUSH error: " << reply->str << endl;
     }
-    freeReplyObject(reply);
-}
-
-void Redis::ltrim(const string &key) {
-    string command = "LTRIM " + key + " 1 0";
-    reply = static_cast<redisReply *>(redisCommand(context, command.c_str()));
     freeReplyObject(reply);
 }
 

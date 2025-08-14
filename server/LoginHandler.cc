@@ -359,7 +359,7 @@ void notify(int fd, const string &UID) {//离线通知
             }
         }
     }
-    //被踢出群聊,都带引号吧。。。。
+    //被踢出群聊,都带引号吧
     num = redis.scard("REMOVE" + UID);
     if (num != 0) {
         redisReply **arr = redis.smembers("REMOVE" + UID);
@@ -448,15 +448,17 @@ void notify(int fd, const string &UID) {//离线通知
         }
     }
 
-
-    // 发送结束标志
-    // sendMsg(fd, "END");
+    //bool变量暂时没用了
+    
     if(msgnum==false){
         sendMsg(fd,"nomsg");
     }
 }
 
 // 处理统一接收线程连接
+
+extern void addFdToUid(int fd, const std::string& uid);
+
 void handleUnifiedReceiver(int epfd, int fd) {
     cout << "[DEBUG] 处理统一接收线程连接，fd: " << fd << endl;
 
@@ -474,13 +476,17 @@ void handleUnifiedReceiver(int epfd, int fd) {
     // 将此连接标记为统一接收连接
     redis.hset("unified_receiver", UID, to_string(fd));
 
-    // 重新加入epoll监听
+
+    // 添加fd到uid的映射，用于心跳管理。内存更快更高效，其实全局都可以用内存
+    addFdToUid(fd, UID);
+
+    // 重加epoll监听
     epoll_event event;
     event.events = EPOLLIN;
     event.data.fd = fd;
     epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event);
 
-    // 立即发送一次通知检查
+    // 离线通知检查
     notify(fd, UID);
 }
 

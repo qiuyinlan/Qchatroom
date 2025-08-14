@@ -39,12 +39,12 @@ mutex ClientState::messageMutex;
 
 
 
-//统一消息接收线程（使用独立连接）
+//统一消息接收线程  fd接收和发送心跳两全
 void unifiedMessageReceiver( string UID) {
     bool state = true; //线程开启
     ClientState::myUID = UID;
 
-    
+
     int receiveFd = Socket();
     Connect(receiveFd, IP, PORT);
 
@@ -53,8 +53,19 @@ void unifiedMessageReceiver( string UID) {
     sendMsg(receiveFd, UID);
 
     string receivedMsg;
-    
- 
+
+    // 启动心跳发送线程
+    thread heartbeatThread([receiveFd]() {
+        while (true) {
+            sleep(30);  
+            if (sendMsg(receiveFd, "HEARTBEAT") <= 0) {
+                cout << "[心跳] 心跳发送失败，连接可能断开" << endl;
+                break;
+            }
+        }
+    });
+    heartbeatThread.detach();  // 分离线程
+
     while (true) {
         //一直处于接收状态，收到——>丢给处理函数去处理
         int ret = recvMsg(receiveFd, receivedMsg);
@@ -63,7 +74,11 @@ void unifiedMessageReceiver( string UID) {
             break;
         }
 
-       
+        // 处理心跳响应
+        // if (receivedMsg == "HEARTBEAT_ACK") {
+        //     cout << "[心跳] 收到心跳响应" << endl;
+        //     continue;
+        // }
 
         //处理不同类型的消息
         processUnifiedMessage(receivedMsg,state);
@@ -229,25 +244,6 @@ void processUnifiedMessage(const string& msg, bool& state) {
         } catch (const exception& e) {
             
             cout << "消息解析失败，跳过" << endl;
-        }
-    }
-}
-
-// 心跳
-void heartbeat(string UID) {
-    int fd = Socket();
-    Connect(fd, IP, PORT);
-
-    sendMsg(fd, "HEARTBEAT");
-    sendMsg(fd, UID);
-   
-    while (true) {
-        this_thread::sleep_for(chrono::seconds(10));  // 秒检测一次
-
-        // 发送心跳包
-        if (sendMsg(fd, "HEARTBEAT") <= 0) {
-            cout << "心跳检测发消息失败，连接可能断开" << endl;
-            break;
         }
     }
 }

@@ -1,4 +1,5 @@
 #include "Redis.h"
+#include "MySQL.h"
 #include "../utils/IO.h"
 #include "group_chat.h"
 #include <nlohmann/json.hpp>
@@ -277,6 +278,12 @@ void GroupChat::startChat() {
         }
         //先存到历史记录里面
         redis.lpush(group.getGroupUid() + "history", msg);
+
+        // 同时存储到MySQL历史记录
+        MySQL mysql;
+        if (mysql.connect()) {
+            mysql.insertGroupMessage(group.getGroupUid(), user.getUID(), msg);
+        }
         message.setUidTo(group.getGroupUid());
         arr = redis.smembers(group.getMembers());
         string UIDto;

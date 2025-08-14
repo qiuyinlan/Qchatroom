@@ -83,8 +83,8 @@ void clientOperation(int fd, User &user) {
     FileTransfer fileTransfer(fd, user);
     
 
-    thread heartbeatThread(heartbeat, user.getUID());
-    heartbeatThread.detach();
+    // thread heartbeatThread(heartbeat, user.getUID());
+    // heartbeatThread.detach();
     thread unifiedRecver(unifiedMessageReceiver, user.getUID());
     unifiedRecver.detach();
 

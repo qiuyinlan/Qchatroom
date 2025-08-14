@@ -35,7 +35,6 @@ public:
     redisReply **lrange(const std::string &key, const std::string &start, const std::string &stop);
     redisReply **lrange(const std::string &key);
     void lpush(const std::string &key, const std::string &value);
-    void ltrim(const std::string &key);
     redisReply **hgetall(const std::string &key);
     int hlen(const std::string &key);
     redisContext* getContext() { return context; }  // 添加获取context的方法
