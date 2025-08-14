@@ -860,9 +860,10 @@ void unblocked(int fd, User &user) {
         filePath = "./fileBuffer_send/" + fileName;
 
        
-        //最后一个groupName填了文件名，接收的时候会显示
-        Message message(user.getUsername(), user.getUID(), _friend.getUID(), fileName);
+        //创建文件传输消息，groupName设为"1"表示私聊
+        Message message(user.getUsername(), user.getUID(), _friend.getUID(), "1");
         message.setContent(filePath);
+        message.setGroupName(fileName);  // 文件名存储在groupName中
         if (!filesystem::exists("./fileBuffer_send")) {
             filesystem::create_directories("./fileBuffer_send");
         }
@@ -921,12 +922,19 @@ void unblocked(int fd, User &user) {
         fileMessage.setGroupName("1");  // 私聊标识
 
         
-        // 保存到双方
+        // 保存到双方（Redis + MySQL）
         string senderHistory = user.getUID() + _friend.getUID();
         string receiverHistory = _friend.getUID() + user.getUID();
         string fileMessageJson = fileMessage.to_json();
         redis.lpush(senderHistory, fileMessageJson);
         redis.lpush(receiverHistory, fileMessageJson);
+
+        // 同时保存到MySQL
+        MySQL mysql;
+        if (mysql.connect()) {
+            mysql.insertPrivateMessage(user.getUID(), _friend.getUID(), "[文件]" + fileName);
+            cout << "[DEBUG] 文件传输记录已保存到MySQL" << endl;
+        }
 
         // 保存到接收方的文件接收队列
         redis.sadd("recv" + _friend.getUID(), message.to_json());
@@ -996,7 +1004,20 @@ void recvFile_Friend(int epfd, int fd) {
     string path;
     
     redisReply **arr = redis.smembers("recv" + user.getUID());
-    
+
+    cout << "[DEBUG] 接收队列中的原始数据: " << arr[0]->str << endl;
+
+    // 检查数据格式
+    try {
+        json test_json = json::parse(arr[0]->str);
+        cout << "[DEBUG] JSON格式验证通过" << endl;
+    } catch (const exception& e) {
+        cout << "[ERROR] 接收队列中的数据不是有效JSON: " << e.what() << endl;
+        cout << "[ERROR] 原始数据: " << arr[0]->str << endl;
+        sendMsg(fd, "INVALID_FILE_DATA");
+        freeReplyObject(arr[0]);
+        return;
+    }
 
     sendMsg(fd, arr[0]->str);
     message.json_parse(arr[0]->str);
@@ -1511,6 +1532,43 @@ void start_chat_mysql(int fd, User &user) {
         }
 
         cout << "[DEBUG] 收到消息: " << msg << endl;
+
+        // 文件传输的特殊检查
+        if (msg == "send" || msg == "recv") {
+            cout << "[DEBUG] 检测到文件传输命令: " << msg << endl;
+
+            // 检查是否被对方删除
+            if (!redis.sismember(target_user_id, user.getUID())) {
+                string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
+                int receiver_fd = stoi(receiver_fd_str);
+                sendMsg(receiver_fd, "FRIEND_VERIFICATION_NEEDED");
+                sendMsg(fd, "fail");
+                continue;
+            }
+
+            // 检查是否被屏蔽
+            if (redis.sismember("blocked" + target_user_id, user.getUID())) {
+                string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
+                int receiver_fd = stoi(receiver_fd_str);
+                sendMsg(receiver_fd, "BLOCKED_MESSAGE");
+                sendMsg(fd, "fail");
+                continue;
+            }
+
+            // 检查是否注销
+            if (redis.sismember("deactivated_users", target_user_id)) {
+                string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
+                int receiver_fd = stoi(receiver_fd_str);
+                sendMsg(receiver_fd, "DEACTIVATED_MESSAGE");
+                sendMsg(fd, "fail");
+                continue;
+            }
+
+            // 如果都没问题，发送成功信号
+            cout << "[DEBUG] 文件传输权限检查通过" << endl;
+            sendMsg(fd, "success");
+            continue;
+        }
 
         // 解析消息
         Message message;
