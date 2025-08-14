@@ -8,25 +8,45 @@
 class MySQL {
 private:
     MYSQL* conn;
-    
+
 public:
     MySQL();
     ~MySQL();
-    
+
     // 连接数据库
     bool connect();
-    
+
     // 插入群聊消息
     bool insertGroupMessage(const std::string& group_uid, const std::string& sender_uid, const std::string& content);
-    
+
     // 插入私聊消息
     bool insertPrivateMessage(const std::string& sender_uid, const std::string& receiver_uid, const std::string& content);
-    
+
     // 获取群聊历史消息
     std::vector<std::string> getGroupHistory(const std::string& group_uid, int limit = 50);
-    
+
     // 获取私聊历史消息
     std::vector<std::string> getPrivateHistory(const std::string& user1, const std::string& user2, int limit = 50);
+
+    // ========== 新增：好友管理和拉黑功能 ==========
+
+    // 检查是否为好友关系
+    bool isFriend(const std::string& user1, const std::string& user2);
+
+    // 检查是否被屏蔽
+    bool isBlocked(const std::string& user, const std::string& blocked_user);
+
+    // 添加好友关系
+    bool addFriend(const std::string& user1, const std::string& user2);
+
+    // 删除好友关系
+    bool deleteFriend(const std::string& user1, const std::string& user2);
+
+    // 屏蔽用户
+    bool blockUser(const std::string& user, const std::string& blocked_user);
+
+    // 解除屏蔽
+    bool unblockUser(const std::string& user, const std::string& blocked_user);
 };
 
 #endif

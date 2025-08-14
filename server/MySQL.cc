@@ -1,8 +1,54 @@
 #include "MySQL.h"
+#include "Redis.h"
 #include <iostream>
 #include <cstring>
+#include <nlohmann/json.hpp>
 
 using namespace std;
+using json = nlohmann::json;
+
+// 辅助函数：从Redis获取用户名
+string getUsernameFromRedis(const string& uid) {
+    Redis redis;
+    if (!redis.connect()) {
+        return uid; // 如果Redis连接失败，返回UID
+    }
+
+    // 尝试从不同的Redis key获取用户信息
+    string user_info;
+
+    // 1. 尝试从hash表"users"中获取用户信息
+    if (redis.hexists("users", uid)) {
+        user_info = redis.hget("users", uid);
+    }
+    // 2. 尝试从hash表"user_info"中获取用户信息
+    else if (redis.hexists("user_info", uid)) {
+        user_info = redis.hget("user_info", uid);
+    }
+    // 3. 尝试从"username"中获取
+    else {
+        user_info = redis.hget("username", uid);
+    }
+
+    // 如果获取到的是JSON格式，解析出username字段
+    if (!user_info.empty() && user_info != "(nil)") {
+        try {
+            json user_json = json::parse(user_info);
+            if (user_json.contains("username")) {
+                string username = user_json["username"].get<string>();
+                if (!username.empty()) {
+                    return username;
+                }
+            }
+        } catch (const exception& e) {
+            // 如果不是JSON格式，直接返回原字符串（可能就是用户名）
+            return user_info;
+        }
+    }
+
+    // 如果都获取不到，返回UID
+    return uid;
+}
 
 MySQL::MySQL() : conn(nullptr) {}
 
@@ -21,13 +67,13 @@ bool MySQL::connect() {
     }
     
     // 连接数据库
-    if (!mysql_real_connect(conn, 
+    if (!mysql_real_connect(conn,
                            "localhost",     // 主机
                            "root",          // 用户名
-                           "password",      // 密码，你需要改成你的MySQL密码
+                           "123",              // 如果没有密码就留空，有密码就填写正确的密码
                            "chatroom",      // 数据库名
                            3306,            // 端口
-                           nullptr, 
+                           nullptr,
                            0)) {
         cout << "[MySQL ERROR] Connection failed: " << mysql_error(conn) << endl;
         mysql_close(conn);
@@ -35,7 +81,15 @@ bool MySQL::connect() {
         return false;
     }
     
-    cout << "[MySQL] Connected successfully" << endl;
+    // 设置自动提交模式
+    if (mysql_autocommit(conn, 1)) {
+        cout << "[MySQL ERROR] Failed to set autocommit: " << mysql_error(conn) << endl;
+        mysql_close(conn);
+        conn = nullptr;
+        return false;
+    }
+
+    cout << "[MySQL] Connected successfully with autocommit enabled" << endl;
     return true;
 }
 
@@ -102,7 +156,8 @@ bool MySQL::insertPrivateMessage(const string& sender_uid, const string& receive
         cout << "[MySQL ERROR] Not connected" << endl;
         return false;
     }
-    
+
+    // 存储消息内容，sender_uid和receiver_uid用于查询索引
     const char* sql = "INSERT INTO private_messages (sender_uid, receiver_uid, content) VALUES (?, ?, ?)";
     MYSQL_STMT* stmt = mysql_stmt_init(conn);
     
@@ -143,9 +198,16 @@ bool MySQL::insertPrivateMessage(const string& sender_uid, const string& receive
         mysql_stmt_close(stmt);
         return false;
     }
-    
+
+    // 显式提交事务
+    if (mysql_commit(conn)) {
+        cout << "[MySQL ERROR] mysql_commit failed: " << mysql_error(conn) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
     mysql_stmt_close(stmt);
-    cout << "[MySQL] Private message inserted successfully" << endl;
+    cout << "[MySQL] Private message inserted and committed successfully" << endl;
     return true;
 }
 
@@ -249,9 +311,21 @@ vector<string> MySQL::getPrivateHistory(const string& user1, const string& user2
         return messages;
     }
 
-    const char* sql = "SELECT sender_uid, receiver_uid, content, sent_at FROM private_messages "
-                     "WHERE (sender_uid = ? AND receiver_uid = ?) OR (sender_uid = ? AND receiver_uid = ?) "
-                     "ORDER BY sent_at DESC LIMIT ?";
+    cout << "[DEBUG] getPrivateHistory: 查询用户 '" << user1 << "' 和 '" << user2 << "' 之间的消息" << endl;
+
+    const char* sql;
+    bool query_all = (user1.empty() && user2.empty());
+
+    if (query_all) {
+        sql = "SELECT sender_uid, receiver_uid, content, sent_at FROM private_messages ORDER BY sent_at DESC LIMIT ?";
+        cout << "[DEBUG] 查询所有消息" << endl;
+    } else {
+        sql = "SELECT sender_uid, receiver_uid, content, sent_at FROM private_messages "
+              "WHERE (sender_uid = ? AND receiver_uid = ?) OR (sender_uid = ? AND receiver_uid = ?) "
+              "ORDER BY sent_at DESC LIMIT ?";
+        cout << "[DEBUG] 查询特定用户间的消息" << endl;
+    }
+
     MYSQL_STMT* stmt = mysql_stmt_init(conn);
 
     if (!stmt) {
@@ -266,32 +340,48 @@ vector<string> MySQL::getPrivateHistory(const string& user1, const string& user2
     }
 
     // 绑定参数
-    MYSQL_BIND bind_param[5];
-    memset(bind_param, 0, sizeof(bind_param));
+    if (query_all) {
+        // 查询所有消息，只需要绑定limit参数
+        MYSQL_BIND bind_param[1];
+        memset(bind_param, 0, sizeof(bind_param));
 
-    bind_param[0].buffer_type = MYSQL_TYPE_STRING;
-    bind_param[0].buffer = (char*)user1.c_str();
-    bind_param[0].buffer_length = user1.length();
+        bind_param[0].buffer_type = MYSQL_TYPE_LONG;
+        bind_param[0].buffer = &limit;
 
-    bind_param[1].buffer_type = MYSQL_TYPE_STRING;
-    bind_param[1].buffer = (char*)user2.c_str();
-    bind_param[1].buffer_length = user2.length();
+        if (mysql_stmt_bind_param(stmt, bind_param)) {
+            cout << "[MySQL ERROR] mysql_stmt_bind_param failed: " << mysql_stmt_error(stmt) << endl;
+            mysql_stmt_close(stmt);
+            return messages;
+        }
+    } else {
+        // 查询特定用户间的消息
+        MYSQL_BIND bind_param[5];
+        memset(bind_param, 0, sizeof(bind_param));
 
-    bind_param[2].buffer_type = MYSQL_TYPE_STRING;
-    bind_param[2].buffer = (char*)user2.c_str();
-    bind_param[2].buffer_length = user2.length();
+        bind_param[0].buffer_type = MYSQL_TYPE_STRING;
+        bind_param[0].buffer = (char*)user1.c_str();
+        bind_param[0].buffer_length = user1.length();
 
-    bind_param[3].buffer_type = MYSQL_TYPE_STRING;
-    bind_param[3].buffer = (char*)user1.c_str();
-    bind_param[3].buffer_length = user1.length();
+        bind_param[1].buffer_type = MYSQL_TYPE_STRING;
+        bind_param[1].buffer = (char*)user2.c_str();
+        bind_param[1].buffer_length = user2.length();
 
-    bind_param[4].buffer_type = MYSQL_TYPE_LONG;
-    bind_param[4].buffer = &limit;
+        bind_param[2].buffer_type = MYSQL_TYPE_STRING;
+        bind_param[2].buffer = (char*)user2.c_str();
+        bind_param[2].buffer_length = user2.length();
 
-    if (mysql_stmt_bind_param(stmt, bind_param)) {
-        cout << "[MySQL ERROR] mysql_stmt_bind_param failed: " << mysql_stmt_error(stmt) << endl;
-        mysql_stmt_close(stmt);
-        return messages;
+        bind_param[3].buffer_type = MYSQL_TYPE_STRING;
+        bind_param[3].buffer = (char*)user1.c_str();
+        bind_param[3].buffer_length = user1.length();
+
+        bind_param[4].buffer_type = MYSQL_TYPE_LONG;
+        bind_param[4].buffer = &limit;
+
+        if (mysql_stmt_bind_param(stmt, bind_param)) {
+            cout << "[MySQL ERROR] mysql_stmt_bind_param failed: " << mysql_stmt_error(stmt) << endl;
+            mysql_stmt_close(stmt);
+            return messages;
+        }
     }
 
     if (mysql_stmt_execute(stmt)) {
@@ -304,8 +394,8 @@ vector<string> MySQL::getPrivateHistory(const string& user1, const string& user2
     char sender_uid_buf[65];
     char receiver_uid_buf[65];
     char content_buf[1001];
-    char sent_at_buf[20];
-    unsigned long sender_uid_len, receiver_uid_len, content_len, sent_at_len;
+    MYSQL_TIME sent_at_time;
+    unsigned long sender_uid_len, receiver_uid_len, content_len;
 
     MYSQL_BIND bind_result[4];
     memset(bind_result, 0, sizeof(bind_result));
@@ -325,10 +415,9 @@ vector<string> MySQL::getPrivateHistory(const string& user1, const string& user2
     bind_result[2].buffer_length = sizeof(content_buf);
     bind_result[2].length = &content_len;
 
-    bind_result[3].buffer_type = MYSQL_TYPE_STRING;
-    bind_result[3].buffer = sent_at_buf;
-    bind_result[3].buffer_length = sizeof(sent_at_buf);
-    bind_result[3].length = &sent_at_len;
+    bind_result[3].buffer_type = MYSQL_TYPE_TIMESTAMP;
+    bind_result[3].buffer = &sent_at_time;
+    bind_result[3].buffer_length = sizeof(sent_at_time);
 
     if (mysql_stmt_bind_result(stmt, bind_result)) {
         cout << "[MySQL ERROR] mysql_stmt_bind_result failed: " << mysql_stmt_error(stmt) << endl;
@@ -340,14 +429,419 @@ vector<string> MySQL::getPrivateHistory(const string& user1, const string& user2
         string sender_uid_str(sender_uid_buf, sender_uid_len);
         string receiver_uid_str(receiver_uid_buf, receiver_uid_len);
         string content_str(content_buf, content_len);
-        string sent_at_str(sent_at_buf, sent_at_len);
 
-        // 格式化消息：发送者->接收者|内容|时间
-        string formatted_msg = sender_uid_str + "->" + receiver_uid_str + "|" + content_str + "|" + sent_at_str;
-        messages.push_back(formatted_msg);
+        // 格式化时间戳，和Redis版本保持一致：2025-8-14-17:19:11
+        char time_str[64];
+        snprintf(time_str, sizeof(time_str), "%04d-%d-%d-%02d:%02d:%02d",
+                sent_at_time.year, sent_at_time.month, sent_at_time.day,
+                sent_at_time.hour, sent_at_time.minute, sent_at_time.second);
+
+        // 构建JSON消息，和Redis格式保持一致
+        json message_json;
+        message_json["timeStamp"] = string(time_str);
+        message_json["username"] = getUsernameFromRedis(sender_uid_str);  // 从Redis获取真实用户名
+        message_json["UID_from"] = sender_uid_str;
+        message_json["UID_to"] = receiver_uid_str;
+        message_json["content"] = content_str;
+        message_json["group_name"] = "1";  // 私聊消息的group_name设为"1"
+
+        messages.push_back(message_json.dump());
     }
 
     mysql_stmt_close(stmt);
     cout << "[MySQL] Retrieved " << messages.size() << " private messages" << endl;
     return messages;
 }
+
+// ========== 新增：好友管理和拉黑功能实现 ==========
+
+bool MySQL::isFriend(const string& user1, const string& user2) {
+    if (!conn) {
+        cout << "[MySQL ERROR] Not connected" << endl;
+        return false;
+    }
+
+    const char* sql = "SELECT COUNT(*) as cnt FROM friends WHERE (user1 = ? AND user2 = ?) OR (user1 = ? AND user2 = ?)";
+    MYSQL_STMT* stmt = mysql_stmt_init(conn);
+
+    if (!stmt) {
+        cout << "[MySQL ERROR] mysql_stmt_init failed" << endl;
+        return false;
+    }
+
+    if (mysql_stmt_prepare(stmt, sql, strlen(sql))) {
+        cout << "[MySQL ERROR] mysql_stmt_prepare failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    MYSQL_BIND bind[4];
+    memset(bind, 0, sizeof(bind));
+
+    bind[0].buffer_type = MYSQL_TYPE_STRING;
+    bind[0].buffer = (char*)user1.c_str();
+    bind[0].buffer_length = user1.length();
+
+    bind[1].buffer_type = MYSQL_TYPE_STRING;
+    bind[1].buffer = (char*)user2.c_str();
+    bind[1].buffer_length = user2.length();
+
+    bind[2].buffer_type = MYSQL_TYPE_STRING;
+    bind[2].buffer = (char*)user2.c_str();
+    bind[2].buffer_length = user2.length();
+
+    bind[3].buffer_type = MYSQL_TYPE_STRING;
+    bind[3].buffer = (char*)user1.c_str();
+    bind[3].buffer_length = user1.length();
+
+    if (mysql_stmt_bind_param(stmt, bind)) {
+        cout << "[MySQL ERROR] mysql_stmt_bind_param failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    if (mysql_stmt_execute(stmt)) {
+        cout << "[MySQL ERROR] mysql_stmt_execute failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    // 绑定结果
+    int count = 0;
+    MYSQL_BIND result_bind;
+    memset(&result_bind, 0, sizeof(result_bind));
+    result_bind.buffer_type = MYSQL_TYPE_LONG;
+    result_bind.buffer = &count;
+
+    if (mysql_stmt_bind_result(stmt, &result_bind)) {
+        cout << "[MySQL ERROR] mysql_stmt_bind_result failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    bool is_friend = false;
+    if (mysql_stmt_fetch(stmt) == 0) {
+        is_friend = (count > 0);
+    }
+
+    mysql_stmt_close(stmt);
+    return is_friend;
+}
+
+bool MySQL::isBlocked(const string& user, const string& blocked_user) {
+    if (!conn) {
+        cout << "[MySQL ERROR] Not connected" << endl;
+        return false;
+    }
+
+    const char* sql = "SELECT COUNT(*) as cnt FROM blocks WHERE (user = ? AND blocked_user = ?) OR (user = ? AND blocked_user = ?)";
+    MYSQL_STMT* stmt = mysql_stmt_init(conn);
+
+    if (!stmt) {
+        cout << "[MySQL ERROR] mysql_stmt_init failed" << endl;
+        return false;
+    }
+
+    if (mysql_stmt_prepare(stmt, sql, strlen(sql))) {
+        cout << "[MySQL ERROR] mysql_stmt_prepare failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    MYSQL_BIND bind[4];
+    memset(bind, 0, sizeof(bind));
+
+    bind[0].buffer_type = MYSQL_TYPE_STRING;
+    bind[0].buffer = (char*)user.c_str();
+    bind[0].buffer_length = user.length();
+
+    bind[1].buffer_type = MYSQL_TYPE_STRING;
+    bind[1].buffer = (char*)blocked_user.c_str();
+    bind[1].buffer_length = blocked_user.length();
+
+    bind[2].buffer_type = MYSQL_TYPE_STRING;
+    bind[2].buffer = (char*)blocked_user.c_str();
+    bind[2].buffer_length = blocked_user.length();
+
+    bind[3].buffer_type = MYSQL_TYPE_STRING;
+    bind[3].buffer = (char*)user.c_str();
+    bind[3].buffer_length = user.length();
+
+    if (mysql_stmt_bind_param(stmt, bind)) {
+        cout << "[MySQL ERROR] mysql_stmt_bind_param failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    if (mysql_stmt_execute(stmt)) {
+        cout << "[MySQL ERROR] mysql_stmt_execute failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    // 绑定结果
+    int count = 0;
+    MYSQL_BIND result_bind;
+    memset(&result_bind, 0, sizeof(result_bind));
+    result_bind.buffer_type = MYSQL_TYPE_LONG;
+    result_bind.buffer = &count;
+
+    if (mysql_stmt_bind_result(stmt, &result_bind)) {
+        cout << "[MySQL ERROR] mysql_stmt_bind_result failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    bool is_blocked = false;
+    if (mysql_stmt_fetch(stmt) == 0) {
+        is_blocked = (count > 0);
+    }
+
+    mysql_stmt_close(stmt);
+    return is_blocked;
+}
+
+bool MySQL::addFriend(const string& user1, const string& user2) {
+    if (!conn) {
+        cout << "[MySQL ERROR] Not connected" << endl;
+        return false;
+    }
+
+    // 添加双向好友关系
+    const char* sql = "INSERT INTO friends (user1, user2) VALUES (?, ?)";
+    MYSQL_STMT* stmt = mysql_stmt_init(conn);
+
+    if (!stmt) {
+        cout << "[MySQL ERROR] mysql_stmt_init failed" << endl;
+        return false;
+    }
+
+    if (mysql_stmt_prepare(stmt, sql, strlen(sql))) {
+        cout << "[MySQL ERROR] mysql_stmt_prepare failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    // 先添加 user1 -> user2
+    MYSQL_BIND bind[2];
+    memset(bind, 0, sizeof(bind));
+
+    bind[0].buffer_type = MYSQL_TYPE_STRING;
+    bind[0].buffer = (char*)user1.c_str();
+    bind[0].buffer_length = user1.length();
+
+    bind[1].buffer_type = MYSQL_TYPE_STRING;
+    bind[1].buffer = (char*)user2.c_str();
+    bind[1].buffer_length = user2.length();
+
+    if (mysql_stmt_bind_param(stmt, bind)) {
+        cout << "[MySQL ERROR] mysql_stmt_bind_param failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    if (mysql_stmt_execute(stmt)) {
+        cout << "[MySQL ERROR] mysql_stmt_execute failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    // 重置并添加 user2 -> user1
+    mysql_stmt_reset(stmt);
+
+    bind[0].buffer = (char*)user2.c_str();
+    bind[0].buffer_length = user2.length();
+    bind[1].buffer = (char*)user1.c_str();
+    bind[1].buffer_length = user1.length();
+
+    if (mysql_stmt_bind_param(stmt, bind)) {
+        cout << "[MySQL ERROR] mysql_stmt_bind_param failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    if (mysql_stmt_execute(stmt)) {
+        cout << "[MySQL ERROR] mysql_stmt_execute failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    mysql_stmt_close(stmt);
+    cout << "[MySQL] Friend relationship added: " << user1 << " <-> " << user2 << endl;
+    return true;
+}
+
+bool MySQL::deleteFriend(const string& user1, const string& user2) {
+    if (!conn) {
+        cout << "[MySQL ERROR] Not connected" << endl;
+        return false;
+    }
+
+    const char* sql = "DELETE FROM friends WHERE (user1 = ? AND user2 = ?) OR (user1 = ? AND user2 = ?)";
+    MYSQL_STMT* stmt = mysql_stmt_init(conn);
+
+    if (!stmt) {
+        cout << "[MySQL ERROR] mysql_stmt_init failed" << endl;
+        return false;
+    }
+
+    if (mysql_stmt_prepare(stmt, sql, strlen(sql))) {
+        cout << "[MySQL ERROR] mysql_stmt_prepare failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    MYSQL_BIND bind[4];
+    memset(bind, 0, sizeof(bind));
+
+    bind[0].buffer_type = MYSQL_TYPE_STRING;
+    bind[0].buffer = (char*)user1.c_str();
+    bind[0].buffer_length = user1.length();
+
+    bind[1].buffer_type = MYSQL_TYPE_STRING;
+    bind[1].buffer = (char*)user2.c_str();
+    bind[1].buffer_length = user2.length();
+
+    bind[2].buffer_type = MYSQL_TYPE_STRING;
+    bind[2].buffer = (char*)user2.c_str();
+    bind[2].buffer_length = user2.length();
+
+    bind[3].buffer_type = MYSQL_TYPE_STRING;
+    bind[3].buffer = (char*)user1.c_str();
+    bind[3].buffer_length = user1.length();
+
+    if (mysql_stmt_bind_param(stmt, bind)) {
+        cout << "[MySQL ERROR] mysql_stmt_bind_param failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    if (mysql_stmt_execute(stmt)) {
+        cout << "[MySQL ERROR] mysql_stmt_execute failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    mysql_stmt_close(stmt);
+
+    // 同时删除相关的屏蔽关系
+    const char* block_sql = "DELETE FROM blocks WHERE (user = ? AND blocked_user = ?) OR (user = ? AND blocked_user = ?)";
+    MYSQL_STMT* block_stmt = mysql_stmt_init(conn);
+
+    if (block_stmt && mysql_stmt_prepare(block_stmt, block_sql, strlen(block_sql)) == 0) {
+        if (mysql_stmt_bind_param(block_stmt, bind) == 0) {
+            mysql_stmt_execute(block_stmt);
+        }
+        mysql_stmt_close(block_stmt);
+    }
+
+    cout << "[MySQL] Friend relationship deleted: " << user1 << " <-> " << user2 << endl;
+    return true;
+}
+
+bool MySQL::blockUser(const string& user, const string& blocked_user) {
+    if (!conn) {
+        cout << "[MySQL ERROR] Not connected" << endl;
+        return false;
+    }
+
+    const char* sql = "INSERT INTO blocks (user, blocked_user) VALUES (?, ?) ON DUPLICATE KEY UPDATE created_at = CURRENT_TIMESTAMP";
+    MYSQL_STMT* stmt = mysql_stmt_init(conn);
+
+    if (!stmt) {
+        cout << "[MySQL ERROR] mysql_stmt_init failed" << endl;
+        return false;
+    }
+
+    if (mysql_stmt_prepare(stmt, sql, strlen(sql))) {
+        cout << "[MySQL ERROR] mysql_stmt_prepare failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    MYSQL_BIND bind[2];
+    memset(bind, 0, sizeof(bind));
+
+    bind[0].buffer_type = MYSQL_TYPE_STRING;
+    bind[0].buffer = (char*)user.c_str();
+    bind[0].buffer_length = user.length();
+
+    bind[1].buffer_type = MYSQL_TYPE_STRING;
+    bind[1].buffer = (char*)blocked_user.c_str();
+    bind[1].buffer_length = blocked_user.length();
+
+    if (mysql_stmt_bind_param(stmt, bind)) {
+        cout << "[MySQL ERROR] mysql_stmt_bind_param failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    if (mysql_stmt_execute(stmt)) {
+        cout << "[MySQL ERROR] mysql_stmt_execute failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    mysql_stmt_close(stmt);
+    cout << "[MySQL] User blocked: " << user << " blocked " << blocked_user << endl;
+    return true;
+}
+
+bool MySQL::unblockUser(const string& user, const string& blocked_user) {
+    if (!conn) {
+        cout << "[MySQL ERROR] Not connected" << endl;
+        return false;
+    }
+
+    const char* sql = "DELETE FROM blocks WHERE (user = ? AND blocked_user = ?) OR (user = ? AND blocked_user = ?)";
+    MYSQL_STMT* stmt = mysql_stmt_init(conn);
+
+    if (!stmt) {
+        cout << "[MySQL ERROR] mysql_stmt_init failed" << endl;
+        return false;
+    }
+
+    if (mysql_stmt_prepare(stmt, sql, strlen(sql))) {
+        cout << "[MySQL ERROR] mysql_stmt_prepare failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    MYSQL_BIND bind[4];
+    memset(bind, 0, sizeof(bind));
+
+    bind[0].buffer_type = MYSQL_TYPE_STRING;
+    bind[0].buffer = (char*)user.c_str();
+    bind[0].buffer_length = user.length();
+
+    bind[1].buffer_type = MYSQL_TYPE_STRING;
+    bind[1].buffer = (char*)blocked_user.c_str();
+    bind[1].buffer_length = blocked_user.length();
+
+    bind[2].buffer_type = MYSQL_TYPE_STRING;
+    bind[2].buffer = (char*)blocked_user.c_str();
+    bind[2].buffer_length = blocked_user.length();
+
+    bind[3].buffer_type = MYSQL_TYPE_STRING;
+    bind[3].buffer = (char*)user.c_str();
+    bind[3].buffer_length = user.length();
+
+    if (mysql_stmt_bind_param(stmt, bind)) {
+        cout << "[MySQL ERROR] mysql_stmt_bind_param failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    if (mysql_stmt_execute(stmt)) {
+        cout << "[MySQL ERROR] mysql_stmt_execute failed: " << mysql_stmt_error(stmt) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
+    mysql_stmt_close(stmt);
+    cout << "[MySQL] User unblocked: " << user << " unblocked " << blocked_user << endl;
+    return true;
+}
+
+
+

@@ -228,19 +228,19 @@ void serverOperation(int fd, User &user) {
 
         
         if (temp == START_CHAT) {
-            start_chat(fd, user);
+            start_chat_mysql(fd, user);  // 只有聊天消息存储用MySQL
         } else if (temp == LIST_FRIENDS) {
             list_friend(fd, user);
         } else if (temp == ADD_FRIEND) {
-            add_friend(fd, user);
+            add_friend(fd, user);  // 恢复Redis版本
         } else if (temp == FIND_REQUEST) {
             findRequest(fd, user);
         } else if (temp == DEL_FRIEND) {
-            del_friend(fd, user);
+            del_friend(fd, user);  // 恢复Redis版本
         } else if (temp == BLOCKED_LISTS) {
-            blockedLists(fd, user);
+            blockedLists(fd, user);  // 恢复Redis版本
         } else if (temp == UNBLOCKED) {
-            unblocked(fd, user);
+            unblocked(fd, user);  // 恢复Redis版本
         }  else if (temp == SYNC) {
             synchronize(fd, user);
         }  else if (temp == GROUP) {
@@ -253,9 +253,9 @@ void serverOperation(int fd, User &user) {
             GroupChat groupChat(fd, user);
             groupChat.startChat();
         }  else if (temp == "F_HISTORY") {
-            F_history(fd, user);
+            F_history_mysql(fd, user);  // 只有历史消息获取用MySQL
         }  else if (temp == "G_HISTORY") {
-            G_history(fd, user);
+            G_history(fd, user);  // 群聊历史保持Redis版本
         }  else if (temp == DEACTIVATE_ACCOUNT) {
             deactivateAccount(fd, user);
         } else {

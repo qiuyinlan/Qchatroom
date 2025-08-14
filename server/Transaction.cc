@@ -1,5 +1,6 @@
 #include "Transaction.h"
 #include "Redis.h"
+#include "MySQL.h"
 #include "../utils/IO.h"
 #include "../utils/proto.h"
 #include <iostream>
@@ -1421,7 +1422,420 @@ void deactivateAccount(int fd, User &user) {
     redis.srem("is_chat", user.getUID());
 
 
-    
+
     cout << "[DEBUG] 用户 " << user.getUsername() << " 已注销" << endl;
-   
+
 }
+
+// ========== MySQL版本的函数实现 ==========
+
+// MySQL版本的聊天功能（只改消息存储，好友检查还用Redis）
+void start_chat_mysql(int fd, User &user) {
+    Redis redis;
+    redis.connect();
+    MySQL mysql;
+    if (!mysql.connect()) {
+        cout << "[ERROR] start_chat_mysql: MySQL连接失败" << endl;
+        return;
+    }
+
+    redis.sadd("is_chat", user.getUID());
+    string records_index;
+    recvMsg(fd, records_index);
+
+    cout << "[DEBUG] start_chat_mysql: 用户 " << user.getUID() << " 请求与 " << records_index << " 的聊天" << endl;
+    cout << "[DEBUG] records_index 长度: " << records_index.length() << endl;
+    cout << "[DEBUG] records_index 原始内容: '" << records_index << "'" << endl;
+
+    // 修正用户ID格式：如果records_index是两个用户ID的拼接，需要提取对方的ID
+    string target_user_id = records_index;
+    string my_uid = user.getUID();
+
+    // 如果records_index以我的UID开头，那么对方的ID是后面的部分
+    if (records_index.length() > my_uid.length() && records_index.substr(0, my_uid.length()) == my_uid) {
+        target_user_id = records_index.substr(my_uid.length());
+        cout << "[DEBUG] 检测到拼接格式，提取对方ID: " << target_user_id << endl;
+    }
+    // 如果records_index以我的UID结尾，那么对方的ID是前面的部分
+    else if (records_index.length() > my_uid.length() && records_index.substr(records_index.length() - my_uid.length()) == my_uid) {
+        target_user_id = records_index.substr(0, records_index.length() - my_uid.length());
+        cout << "[DEBUG] 检测到拼接格式，提取对方ID: " << target_user_id << endl;
+    }
+
+    cout << "[DEBUG] 最终目标用户ID: " << target_user_id << endl;
+
+    // 先测试查询所有消息，看看数据库中有什么
+    cout << "[DEBUG] 测试查询所有消息..." << endl;
+    vector<string> all_msgs = mysql.getPrivateHistory("", "", 100);  // 查询所有消息
+    cout << "[DEBUG] 数据库中总共有 " << all_msgs.size() << " 条消息" << endl;
+
+    // 从MySQL获取历史消息
+    vector<string> history = mysql.getPrivateHistory(user.getUID(), target_user_id, 50);
+    int num = history.size();
+    cout << "[DEBUG] start_chat_mysql: 获取到 " << num << " 条历史消息" << endl;
+
+    if (num > 50) {
+        num = 50;
+    }
+
+    cout << "[DEBUG] start_chat_mysql: 发送消息数量: " << num << endl;
+    sendMsg(fd, to_string(num));
+
+    // 发送历史消息（倒序，最新的在前）
+    for (int i = num - 1; i >= 0; i--) {
+        cout << "[DEBUG] start_chat_mysql: 发送历史消息 " << (num-i) << "/" << num << ": " << history[i] << endl;
+
+        // 现在history[i]应该已经是完整的JSON格式了，直接发送
+        // 和原来的Redis版本保持一致
+        try {
+            json test_json = json::parse(history[i]);
+            sendMsg(fd, history[i]);
+            cout << "[DEBUG] 发送JSON消息成功" << endl;
+        } catch (const exception& e) {
+            cout << "[DEBUG] JSON解析失败，跳过消息: " << history[i] << endl;
+        }
+    }
+
+    // 开始接收新消息
+    string msg;
+    while (true) {
+        int ret = recvMsg(fd, msg);
+        if (ret <= 0) {
+            redis.srem("is_chat", user.getUID());
+            return;
+        }
+
+        if (msg == EXIT) {
+            redis.srem("is_chat", user.getUID());
+            return;
+        }
+
+        cout << "[DEBUG] 收到消息: " << msg << endl;
+
+        // 解析消息
+        Message message;
+        string UID;
+
+        try {
+            message.json_parse(msg);
+            UID = message.getUidTo();
+            cout << "[DEBUG] JSON解析成功，目标用户: " << UID << endl;
+        } catch (const exception& e) {
+            cout << "[DEBUG] JSON解析失败，可能是纯文本消息: " << msg << endl;
+            // 如果不是JSON，可能是纯文本消息，使用target_user_id作为目标用户
+            UID = target_user_id;
+            message.setContent(msg);
+            message.setUidFrom(user.getUID());
+            message.setUidTo(UID);
+            message.setUsername(user.getUsername());
+            cout << "[DEBUG] 处理为纯文本消息，目标用户: " << UID << endl;
+        }
+
+        // 使用原来的Redis逻辑检查好友关系和屏蔽
+        // 重要：无论什么情况，都要保存消息到MySQL，这样发送者能看到自己的历史记录
+        // 只保存消息内容，不保存完整的JSON
+        mysql.insertPrivateMessage(user.getUID(), UID, message.getContent());
+
+        // 检查是否被对方删除
+        if (!redis.sismember(UID, user.getUID())) {
+            string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
+            int receiver_fd = stoi(receiver_fd_str);
+            sendMsg(receiver_fd, "FRIEND_VERIFICATION_NEEDED");
+            continue;
+        }
+
+        // 屏蔽检查（双向）
+        bool i_blocked_him = redis.sismember("blocked" + user.getUID(), UID);
+        bool he_blocked_me = redis.sismember("blocked" + UID, user.getUID());
+
+        if (i_blocked_him) {
+            // 我屏蔽了对方，不能发送消息
+            string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
+            int receiver_fd = stoi(receiver_fd_str);
+            sendMsg(receiver_fd, "YOU_BLOCKED_USER");  // 提示：你已屏蔽该用户
+            cout << "[DEBUG] 用户 " << user.getUID() << " 屏蔽了 " << UID << "，消息被拒绝" << endl;
+            continue;
+        }
+
+        if (he_blocked_me) {
+            // 对方屏蔽了我，消息不会发送给对方
+            string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
+            int receiver_fd = stoi(receiver_fd_str);
+            sendMsg(receiver_fd, "BLOCKED_MESSAGE");  // 提示：消息被屏蔽
+            cout << "[DEBUG] 用户 " << UID << " 屏蔽了 " << user.getUID() << "，消息被拒绝" << endl;
+            continue;
+        }
+
+        // 注销
+        if (redis.sismember("deactivated_users", UID)) {
+            string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
+            int receiver_fd = stoi(receiver_fd_str);
+            sendMsg(receiver_fd, "DEACTIVATED_MESSAGE");
+            continue;
+        }
+
+        // 对方不在线
+        if (!redis.hexists("is_online", UID)) {
+            // 离线通知还是用Redis
+            redis.lpush("off_msg" + UID, message.getUsername());
+            cout << "[DEBUG] 用户 " << UID << " 离线，保存消息通知: " << message.getUsername() << endl;
+            continue;
+        }
+
+        // 在线处理
+        bool is_chat = redis.sismember("is_chat", UID);
+        if (redis.hexists("unified_receiver", UID)) {
+            string receiver_fd_str = redis.hget("unified_receiver", UID);
+            int receiver_fd = stoi(receiver_fd_str);
+
+            if (is_chat) {
+                sendMsg(receiver_fd, msg);
+            } else {
+                sendMsg(receiver_fd, "MESSAGE:" + message.getUsername());
+            }
+        }
+    }
+}
+
+// MySQL版本的历史消息获取（智能过滤屏蔽消息）
+void F_history_mysql(int fd, User &user) {
+    Redis redis;
+    redis.connect();
+    MySQL mysql;
+    if (!mysql.connect()) {
+        cout << "[ERROR] F_history_mysql: MySQL连接失败" << endl;
+        sendMsg(fd, "0");
+        return;
+    }
+
+    string records_index;
+    recvMsg(fd, records_index);
+
+    cout << "[DEBUG] F_history_mysql: 用户 " << user.getUID() << " 请求与 " << records_index << " 的历史消息" << endl;
+
+    // 修正用户ID格式：如果records_index是两个用户ID的拼接，需要提取对方的ID
+    string target_user_id = records_index;
+    string my_uid = user.getUID();
+
+    // 如果records_index以我的UID开头，那么对方的ID是后面的部分
+    if (records_index.length() > my_uid.length() && records_index.substr(0, my_uid.length()) == my_uid) {
+        target_user_id = records_index.substr(my_uid.length());
+        cout << "[DEBUG] F_history_mysql: 检测到拼接格式，提取对方ID: " << target_user_id << endl;
+    }
+    // 如果records_index以我的UID结尾，那么对方的ID是前面的部分
+    else if (records_index.length() > my_uid.length() && records_index.substr(records_index.length() - my_uid.length()) == my_uid) {
+        target_user_id = records_index.substr(0, records_index.length() - my_uid.length());
+        cout << "[DEBUG] F_history_mysql: 检测到拼接格式，提取对方ID: " << target_user_id << endl;
+    }
+
+    cout << "[DEBUG] F_history_mysql: 最终目标用户ID: " << target_user_id << endl;
+
+    // 使用Redis检查好友关系和屏蔽关系
+    bool is_friend = redis.sismember(user.getUID(), target_user_id);
+    bool i_blocked_him = redis.sismember("blocked" + user.getUID(), target_user_id);
+    bool he_blocked_me = redis.sismember("blocked" + target_user_id, user.getUID());
+
+    cout << "[DEBUG] 关系检查 - 是好友: " << (is_friend ? "是" : "否")
+         << ", 我屏蔽对方: " << (i_blocked_him ? "是" : "否")
+         << ", 对方屏蔽我: " << (he_blocked_me ? "是" : "否") << endl;
+
+    // 修改逻辑：如果不是好友且没有屏蔽关系，才拒绝查询
+    if (!is_friend && !i_blocked_him && !he_blocked_me) {
+        cout << "[DEBUG] 既不是好友也没有屏蔽关系，返回0条消息" << endl;
+        sendMsg(fd, "0");
+        return;
+    }
+
+    // 从MySQL获取所有历史消息
+    vector<string> all_messages = mysql.getPrivateHistory(user.getUID(), target_user_id, 100);
+    cout << "[DEBUG] 从MySQL获取到 " << all_messages.size() << " 条原始消息" << endl;
+
+    // 智能过滤消息：根据当前屏蔽状态过滤（使用已经获取的屏蔽状态）
+    vector<string> filtered_messages;
+
+    cout << "[DEBUG] 屏蔽状态 - 我屏蔽对方: " << (i_blocked_him ? "是" : "否")
+         << ", 对方屏蔽我: " << (he_blocked_me ? "是" : "否") << endl;
+
+    for (const string& msg : all_messages) {
+        cout << "[DEBUG] 处理消息: " << msg << endl;
+
+        try {
+            // 解析JSON消息格式
+            json message_json = json::parse(msg);
+            string sender = message_json["UID_from"].get<string>();
+            cout << "[DEBUG] 消息发送者: " << sender << endl;
+
+            // 过滤逻辑：
+            if (sender == user.getUID()) {
+                // 我发送的消息：总是显示（让我看到我发过的消息）
+                cout << "[DEBUG] 我的消息，添加到过滤列表" << endl;
+                filtered_messages.push_back(msg);
+            } else {
+                // 对方发送的消息：只有在我没有屏蔽对方时才显示
+                if (!i_blocked_him) {
+                    cout << "[DEBUG] 对方的消息，我没屏蔽对方，添加到过滤列表" << endl;
+                    filtered_messages.push_back(msg);
+                } else {
+                    cout << "[DEBUG] 对方的消息，我屏蔽了对方，跳过" << endl;
+                }
+            }
+        } catch (const exception& e) {
+            cout << "[DEBUG] JSON解析失败，跳过消息: " << msg << endl;
+            continue;
+        }
+    }
+
+    cout << "[DEBUG] 过滤后剩余 " << filtered_messages.size() << " 条消息" << endl;
+
+    int num = filtered_messages.size();
+    int up = 20;
+    int down = 0;
+    int first = num;
+    bool signal = false;
+
+    if (num > 20) {
+        num = 20;
+        signal = true;
+    } else {
+        signal = false;
+    }
+
+    sendMsg(fd, to_string(num));
+
+    // 发送消息（倒序，最新的在前）
+    for (int i = num - 1; i >= 0; i--) {
+        sendMsg(fd, filtered_messages[i]);
+    }
+
+    // 发送总消息数给客户端，用于状态判断
+    sendMsg(fd, to_string(first));
+
+    // 处理分页请求（兼容原来的1/2/0输入方式）
+    string order;
+    while (true) {
+        int ret = recvMsg(fd, order);
+        if (ret <= 0) break;
+
+        if (order == "0") {
+            return;  // 退出历史记录
+        }
+
+        if (order == "1") { // 查看前20条（更早的消息）
+            // 如果当前没有更多消息，直接返回
+            if (!signal || down >= first) {
+                sendMsg(fd, "less");
+                continue;
+            }
+
+            // 前20
+            up += 20;
+            down += 20;
+
+            // 剩余<20，false
+            if (up >= first) {
+                signal = false;
+                sendMsg(fd, "more");
+                sendMsg(fd, to_string(first - 1));
+                sendMsg(fd, to_string(down));
+
+                // 重新获取消息范围
+                int actualCount = first - down;
+                if (actualCount <= 0) {
+                    sendMsg(fd, "less");
+                    continue;
+                }
+
+                // 发送消息
+                for (int i = first - 1; i >= down; i--) {
+                    if (i < filtered_messages.size()) {
+                        sendMsg(fd, filtered_messages[i]);
+                    }
+                }
+                continue;
+            }
+
+            // 前20，剩余>20，true
+            signal = true;
+            sendMsg(fd, "more");
+            sendMsg(fd, to_string(up - 1));
+            sendMsg(fd, to_string(down));
+
+            // 重新获取消息范围
+            int actualCount = up - down;
+            if (actualCount <= 0) {
+                sendMsg(fd, "less");
+                continue;
+            }
+
+            // 发送消息
+            for (int i = up - 1; i >= down; i--) {
+                if (i < filtered_messages.size()) {
+                    sendMsg(fd, filtered_messages[i]);
+                }
+            }
+            continue;
+
+        } else if (order == "2") { // 查看后20条（更新的消息）
+            if (down <= 0) {
+                sendMsg(fd, "less");
+                continue;
+            }
+
+            // 调整分页范围
+            up -= 20;
+            down -= 20;
+            if (down < 0) {
+                sendMsg(fd, "less");
+                continue;
+            }
+
+            // 如果返回到最新页面，重新设置signal为true
+            if (down == 0) {
+                signal = true;
+            }
+
+            sendMsg(fd, "more");
+            sendMsg(fd, to_string(up - 1));
+            sendMsg(fd, to_string(down));
+
+            // 重新获取消息范围
+            int actualCount = up - down;
+            if (actualCount <= 0) {
+                sendMsg(fd, "less");
+                continue;
+            }
+
+            // 发送消息
+            for (int i = up - 1; i >= down; i--) {
+                if (i < filtered_messages.size()) {
+                    sendMsg(fd, filtered_messages[i]);
+                }
+            }
+            continue;
+        }
+
+        // 兼容旧的"more"请求
+        if (order == "more") {
+            if (signal) {
+                int start_index = up;
+                int new_count = filtered_messages.size() - start_index;
+                if (new_count > 0 && start_index < filtered_messages.size()) {
+                    int actual_count = min(20, new_count);
+                    sendMsg(fd, to_string(actual_count));
+                    for (int i = start_index + actual_count - 1; i >= start_index; i--) {
+                        sendMsg(fd, filtered_messages[i]);
+                    }
+                    up += 20;
+                } else {
+                    sendMsg(fd, "less");
+                }
+            } else {
+                sendMsg(fd, "less");
+            }
+        } else if (order == "exit") {
+            break;
+        }
+    }
+}
+
+

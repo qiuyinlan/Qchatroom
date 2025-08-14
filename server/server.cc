@@ -68,7 +68,7 @@ void checkHeartbeatTimeout() {
     redis.connect();
 
     for (auto it = last_activity.begin(); it != last_activity.end();) {
-        if (now - it->second > 60) {  // 秒超时
+        if (now - it->second > 30) {  // 30秒超时
             cout << "[心跳超时] 用户 " << it->first << " 超时，清理状态" << endl;
 
             // 清理用户状态
@@ -191,11 +191,11 @@ int main(int argc, char *argv[]) {
 
     while (true) {
         // 使用超时的epoll_wait，每5秒检查一次心跳
-        ret = epoll_wait(epfd, ep, 1024, 30000);  // 5秒超时
+        ret = epoll_wait(epfd, ep, 1024, 5000);  // 5秒超时
 
         // 检查心跳
         time_t now = time(nullptr);
-        if (now - last_heartbeat_check >= 30) {  
+        if (now - last_heartbeat_check >= 10) {  // 每10秒检查一次
             checkHeartbeatTimeout();
             last_heartbeat_check = now;
         }
