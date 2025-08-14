@@ -257,12 +257,30 @@ void G_history(int fd, User &user) {
     Redis redis;
     redis.connect();
 
+    MySQL mysql;
+    mysql.connect();
+
     string group_id;
     recvMsg(fd, group_id);
 
-    string records_index = group_id + "history";  // 群聊历史记录索引
+    string records_index = group_id + "history";  // 保持原有变量名，用于兼容
 
-    int num = redis.llen(records_index);
+    // 检查用户加入群聊的时间
+    string user_join_time_str = redis.hget("user_join_time", group_id + user.getUID());
+    vector<string> all_messages;
+
+    if (!user_join_time_str.empty() && user_join_time_str != "(nil)") {
+        // 有加入时间记录，只显示加入时间之后的消息
+        time_t join_time = stoll(user_join_time_str);
+        cout << "[DEBUG] 用户加入群聊时间: " << join_time << "，只显示之后的消息" << endl;
+        all_messages = mysql.getGroupHistoryAfterTime(group_id, join_time, 1000);  // 获取更多消息用于分页
+    } else {
+        // 没有加入时间记录，显示所有历史消息
+        cout << "[DEBUG] 没有加入时间记录，显示所有群聊历史消息" << endl;
+        all_messages = mysql.getGroupHistory(group_id, 1000);  // 获取更多消息用于分页
+    }
+
+    int num = all_messages.size();
 
     int up = 20;
     int down = 0;
@@ -280,21 +298,15 @@ void G_history(int fd, User &user) {
     }
     sendMsg(fd, to_string(num));
 
-    redisReply **arr = redis.lrange(records_index, "0", to_string(num - 1));
-    //先发最新的消息，所以要倒序遍历
+    // 发送MySQL中的群聊历史消息（倒序，最新的在前）
     for (int i = num - 1; i >= 0; i--) {
-        string msg_content = arr[i]->str;
+        string msg_content = all_messages[i];
         try {
             json test_json = json::parse(msg_content);
             sendMsg(fd, msg_content);
         } catch (const exception& e) {
             continue;
         }
-        freeReplyObject(arr[i]);
-    }
-    // 释放初始数组
-    if (arr != nullptr) {
-        free(arr);
     }
     
     // 发送总消息数给客户端，用于状态判断
@@ -329,26 +341,23 @@ void G_history(int fd, User &user) {
                 sendMsg(fd, to_string(first - 1));
                 sendMsg(fd, to_string(down));
                 
-                // 重新获取消息范围
+                // 从MySQL数据中获取消息范围
                 int actualCount = first - down;
-                if (actualCount <= 0) {
+                if (actualCount <= 0 || down >= (int)all_messages.size()) {
                     sendMsg(fd, "less");
                     continue;
                 }
-                redisReply **newArr = redis.lrange(records_index, to_string(down), to_string(first - 1));
-                for (int i = actualCount - 1; i >= 0; i--) {
-                    string msg_content = newArr[i]->str;
+
+                // 从all_messages数组中获取指定范围的消息
+                int end_idx = min(first - 1, (int)all_messages.size() - 1);
+                for (int i = end_idx; i >= down && i >= 0; i--) {
+                    string msg_content = all_messages[i];
                     try {
                         json test_json = json::parse(msg_content);
                         sendMsg(fd, msg_content);
                     } catch (const exception& e) {
                         continue;
                     }
-                    freeReplyObject(newArr[i]);
-                }
-                // 释放数组
-                if (newArr != nullptr) {
-                    free(newArr);
                 }
                 continue;
             }
@@ -366,20 +375,16 @@ void G_history(int fd, User &user) {
                 sendMsg(fd, "less");
                 continue;
             }
-            redisReply **newArr = redis.lrange(records_index, to_string(down), to_string(up - 1));
-            for (int i = actualCount - 1; i >= 0; i--) {
-                string msg_content = newArr[i]->str;
+            // 从MySQL数据中获取消息范围
+            int end_idx = min(up - 1, (int)all_messages.size() - 1);
+            for (int i = end_idx; i >= down && i >= 0; i--) {
+                string msg_content = all_messages[i];
                 try {
                     json test_json = json::parse(msg_content);
                     sendMsg(fd, msg_content);
                 } catch (const exception& e) {
                     continue;
                 }
-                freeReplyObject(newArr[i]);
-            }
-            // 释放数组
-            if (newArr != nullptr) {
-                free(newArr);
             }
             continue;
                 
@@ -413,20 +418,16 @@ void G_history(int fd, User &user) {
                 sendMsg(fd, "less");
                 continue;
             }
-            redisReply **newArr = redis.lrange(records_index, to_string(down), to_string(up - 1));
-            for (int i = actualCount - 1; i >= 0; i--) {
-                string msg_content = newArr[i]->str;
+            // 从MySQL数据中获取消息范围
+            int end_idx = min(up - 1, (int)all_messages.size() - 1);
+            for (int i = end_idx; i >= down && i >= 0; i--) {
+                string msg_content = all_messages[i];
                 try {
                     json test_json = json::parse(msg_content);
                     sendMsg(fd, msg_content);
                 } catch (const exception& e) {
                     continue;
                 }
-                freeReplyObject(newArr[i]);
-            }
-            // 释放数组
-            if (newArr != nullptr) {
-                free(newArr);
             }
             continue;
         }
@@ -738,6 +739,15 @@ void findRequest(int fd, User &user) {
 
                 //加上好友之后，我俩的好友申请列表里，都不会再出现对方了！！！
                 redis.srem(string(arr[i]->str) + "add_friend", user.getUID());
+
+                // ========== 新增：更新好友时间戳（模仿群聊逻辑） ==========
+                // 重新添加好友时，更新时间戳
+                time_t now = time(nullptr);
+                redis.hset("friend_join_time", user.getUID() + "_" + string(arr[i]->str), to_string(now));
+                redis.hset("friend_join_time", string(arr[i]->str) + "_" + user.getUID(), to_string(now));
+
+                cout << "[DEBUG] 重新添加好友，更新时间戳: " << user.getUID() << " <-> " << arr[i]->str << "，时间: " << now << endl;
+
                 freeReplyObject(arr[i]);
                 continue;
             }else if (reply == "0") {
@@ -765,6 +775,14 @@ void del_friend(int fd, User &user) {
     redis.del(user.getUID() + UID);
     //删除我对他的屏蔽关系
     redis.srem("blocked" + user.getUID(), UID);
+
+    // ========== 新增：删除好友的逻辑（模仿群聊时间戳） ==========
+
+    // 记录删除时间戳（模仿群聊的user_join_time逻辑）
+    time_t now = time(nullptr);
+    redis.hset("friend_join_time", user.getUID() + "_" + UID, to_string(now));
+    cout << "[DEBUG] 用户 " << user.getUID() << " 删除了好友 " << UID << "，设置时间戳: " << now << endl;
+
     // 移除通知机制 - 不再发送删除通知
     // redis.sadd(UID + "del", user.getUsername());
 }
@@ -1422,6 +1440,13 @@ void deactivateAccount(int fd, User &user) {
             redis.del(group.getGroupUid() + "history");
             redis.srem("group_Name", group.getGroupName());
             redis.hdel("group_info", group.getGroupUid());
+
+            // ========== 新增：删除MySQL中的群聊消息 ==========
+            MySQL mysql;
+            if (mysql.connect()) {
+                mysql.deleteGroupMessages(group.getGroupUid());
+                cout << "[DEBUG] 解散群聊，已删除MySQL中的群聊消息: " << group.getGroupUid() << endl;
+            }
             freeReplyObject(arr[i]);
         }
     }
@@ -1704,8 +1729,20 @@ void F_history_mysql(int fd, User &user) {
         return;
     }
 
-    // 从MySQL获取所有历史消息
-    vector<string> all_messages = mysql.getPrivateHistory(user.getUID(), target_user_id, 100);
+    // 检查是否有好友加入时间记录，如果有则只显示该时间之后的消息
+    string friend_join_time_str = redis.hget("friend_join_time", user.getUID() + "_" + target_user_id);
+    vector<string> all_messages;
+
+    if (!friend_join_time_str.empty() && friend_join_time_str != "(nil)") {
+        // 有好友加入时间记录，只显示该时间之后的消息
+        time_t join_time = stoll(friend_join_time_str);
+        cout << "[DEBUG] 检测到好友加入时间: " << join_time << "，只显示之后的消息" << endl;
+        all_messages = mysql.getPrivateHistoryAfterTime(user.getUID(), target_user_id, join_time, 100);
+    } else {
+        // 没有好友加入时间记录，显示所有历史消息
+        cout << "[DEBUG] 没有好友加入时间记录，显示所有历史消息" << endl;
+        all_messages = mysql.getPrivateHistory(user.getUID(), target_user_id, 100);
+    }
     cout << "[DEBUG] 从MySQL获取到 " << all_messages.size() << " 条原始消息" << endl;
 
     // 智能过滤消息：根据当前屏蔽状态过滤（使用已经获取的屏蔽状态）

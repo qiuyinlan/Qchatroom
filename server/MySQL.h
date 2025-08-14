@@ -25,8 +25,14 @@ public:
     // 获取群聊历史消息
     std::vector<std::string> getGroupHistory(const std::string& group_uid, int limit = 50);
 
+    // 获取群聊历史消息（指定时间之后的）
+    std::vector<std::string> getGroupHistoryAfterTime(const std::string& group_uid, time_t after_time, int limit = 50);
+
     // 获取私聊历史消息
     std::vector<std::string> getPrivateHistory(const std::string& user1, const std::string& user2, int limit = 50);
+
+    // 获取私聊历史消息（指定时间之后的）
+    std::vector<std::string> getPrivateHistoryAfterTime(const std::string& user1_uid, const std::string& user2_uid, time_t after_time, int limit = 50);
 
     // ========== 新增：好友管理和拉黑功能 ==========
 
@@ -47,6 +53,14 @@ public:
 
     // 解除屏蔽
     bool unblockUser(const std::string& user, const std::string& blocked_user);
+
+    // ========== 删除好友时的消息处理 ==========
+
+    // 完全删除消息（双方都删除时）
+    bool deleteMessagesCompletely(const std::string& user1_uid, const std::string& user2_uid);
+
+    // 删除群聊的所有消息（解散群聊时）
+    bool deleteGroupMessages(const std::string& group_uid);
 };
 
 #endif
