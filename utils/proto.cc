@@ -39,10 +39,11 @@ void LoginRequest::json_parse(const string &json_str) {
     // password = root["password"].get<string>();
     try {
         json root = json::parse(json_str);
-        // 使用 value() 方法，如果键不存在或为null，返回第二个参数的默认值（空字符串）
+        
         email = root.value("email", "");
         password = root.value("password", "");
     } catch (const json::exception& e) {
+        //异常类，来表示错误，&e引用
         // 处理JSON解析本身的错误，例如字符串格式不正确
         cerr << "[ERROR] LoginRequest JSON解析失败: " << e.what() << endl;
         cerr << "[ERROR] JSON内容: " << json_str << endl;

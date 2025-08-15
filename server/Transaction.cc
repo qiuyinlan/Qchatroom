@@ -65,565 +65,6 @@ void synchronize(int fd, User &user) {
 }
 
 
-//待修复隐患：群聊因为时间，实际可能比20条少
-void F_history(int fd, User &user) {
-
-    Redis redis;
-    redis.connect();
-
-    string records_index;
-    //收历史记录索引
-    recvMsg(fd, records_index);
-
-    int num = redis.llen(records_index);
-
-    int up = 20;
-    int down = 0;
-    int first = num;//初始值
-    bool signal = false;//大于20变成true,有剩余，小于变成false
-    
-    //发
-    if (num > 20) {
-        num = 20;
-        signal = true;
-    } else {
-        // 如果总数小于等于20，说明没有更多消息了
-        signal = false;
-    }
-    
-
-    sendMsg(fd, to_string(num));
-
-    redisReply **arr = redis.lrange(records_index, "0", to_string(num - 1));
-    //先发最新的消息，所以要倒序遍历
-    for (int i = num - 1; i >= 0; i--) {
-        string msg_content = arr[i]->str;
-        try {
-            json test_json = json::parse(msg_content);
-            //循环发信息
-            sendMsg(fd, msg_content);
-        } catch (const exception& e) {
-            continue;
-        }
-        freeReplyObject(arr[i]);
-    }
-    // 释放初始数组
-    if (arr != nullptr) {
-        free(arr);
-    }
-    
-    // 发送总消息数给客户端，用于状态判断
-    sendMsg(fd, to_string(first));
-    
-    string order;
-    while (true) {
-        recvMsg(fd, order);
-        if (order == "0") {
-            return;
-        }
-
-        if (order == "1") { // 查看前20条（更早的消息）
-
-            // 如果当前没有更多消息，直接返回
-            if (!signal || down >= first) {
-
-                sendMsg(fd, "less");
-                continue;
-            }
-            
-            //前20
-            up += 20;
-            down += 20;
-
-            
-            //剩余<20。false
-            if (up >= first) {
-                signal = false;
-
-                sendMsg(fd, "more");
-                sendMsg(fd, to_string(first - 1));
-                sendMsg(fd, to_string(down));
-                
-                // 重新获取消息范围
-                int actualCount = first - down;
-                if (actualCount <= 0) {
-                    sendMsg(fd, "less");
-                    continue;
-                }
-                redisReply **newArr = redis.lrange(records_index, to_string(down), to_string(first - 1));
-                for (int i = actualCount - 1; i >= 0; i--) {
-                    string msg_content = newArr[i]->str;
-                    try {
-                        json test_json = json::parse(msg_content);
-                        sendMsg(fd, msg_content);
-                    } catch (const exception& e) {
-                        continue;
-                    }
-                    freeReplyObject(newArr[i]);
-                }
-                // 释放数组
-                if (newArr != nullptr) {
-                    free(newArr);
-                }
-                continue;
-            }
-            
-            //前20,剩余>20，true
-            signal = true;
-
-            sendMsg(fd, "more");
-            sendMsg(fd, to_string(up - 1));
-            sendMsg(fd, to_string(down));
-            
-            // 重新获取消息范围
-            int actualCount = up - down;
-            if (actualCount <= 0) {
-                sendMsg(fd, "less");
-                continue;
-            }
-            redisReply **newArr = redis.lrange(records_index, to_string(down), to_string(up - 1));
-            for (int i = actualCount - 1; i >= 0; i--) {
-                string msg_content = newArr[i]->str;
-                try {
-                    json test_json = json::parse(msg_content);
-                    sendMsg(fd, msg_content);
-                } catch (const exception& e) {
-                    continue;
-                }
-                freeReplyObject(newArr[i]);
-            }
-            // 释放数组
-            if (newArr != nullptr) {
-                free(newArr);
-            }
-            continue;
-                
-        } else if (order == "2") { // 查看后20条（更新的消息）
-
-            if (down <= 0) {
-
-                sendMsg(fd, "less");
-                continue;
-            }
-            
-            // 调整分页范围
-            up -= 20;
-            down -= 20;
-            if (down < 0) {
-
-                sendMsg(fd, "less");
-                continue;
-            }
-            // 如果返回到最新页面，重新设置signal为true
-            if (down == 0) {
-                signal = true;
-
-            }
-
-            
-
-            sendMsg(fd, "more");
-            sendMsg(fd, to_string(up - 1));
-            sendMsg(fd, to_string(down));
-            
-            // 重新获取消息范围
-            int actualCount = up - down;
-            if (actualCount <= 0) {
-                sendMsg(fd, "less");
-                continue;
-            }
-            redisReply **newArr = redis.lrange(records_index, to_string(down), to_string(up - 1));
-            for (int i = actualCount - 1; i >= 0; i--) {
-                string msg_content = newArr[i]->str;
-                try {
-                    json test_json = json::parse(msg_content);
-                    sendMsg(fd, msg_content);
-                } catch (const exception& e) {
-                    continue;
-                }
-                freeReplyObject(newArr[i]);
-            }
-            // 释放数组
-            if (newArr != nullptr) {
-                free(newArr);
-            }
-            continue;
-        }
-    }
-}
-
-void G_history(int fd, User &user) {
-
-    Redis redis;
-    redis.connect();
-
-    MySQL mysql;
-    mysql.connect();
-
-    string group_id;
-    recvMsg(fd, group_id);
-
-    string records_index = group_id + "history";  // 保持原有变量名，用于兼容
-
-    // 检查用户加入群聊的时间
-    string user_join_time_str = redis.hget("user_join_time", group_id + user.getUID());
-    vector<string> all_messages;
-
-    if (!user_join_time_str.empty() && user_join_time_str != "(nil)") {
-        // 有加入时间记录，只显示加入时间之后的消息
-        time_t join_time = stoll(user_join_time_str);
-        cout << "[DEBUG] 用户加入群聊时间: " << join_time << "，只显示之后的消息" << endl;
-        all_messages = mysql.getGroupHistoryAfterTime(group_id, join_time, 1000);  // 获取更多消息用于分页
-    } else {
-        // 没有加入时间记录，显示所有历史消息
-        cout << "[DEBUG] 没有加入时间记录，显示所有群聊历史消息" << endl;
-        all_messages = mysql.getGroupHistory(group_id, 1000);  // 获取更多消息用于分页
-    }
-
-    int num = all_messages.size();
-
-    int up = 20;
-    int down = 0;
-    int first = num;
-    bool signal = false;
-
-    sendMsg(fd,redis.hget("user_join_time",group_id+user.getUID()));
-
-    if (num > 20) {
-        num = 20;
-        signal = true;
-    } else {
-        // 如果总数小于等于20，说明没有更多消息了
-        signal = false;
-    }
-    sendMsg(fd, to_string(num));
-
-    // 发送MySQL中的群聊历史消息（倒序，最新的在前）
-    for (int i = num - 1; i >= 0; i--) {
-        string msg_content = all_messages[i];
-        try {
-            json test_json = json::parse(msg_content);
-            sendMsg(fd, msg_content);
-        } catch (const exception& e) {
-            continue;
-        }
-    }
-    
-    // 发送总消息数给客户端，用于状态判断
-    sendMsg(fd, to_string(first));
-
-    string order;
-    while (true) {
-        recvMsg(fd, order);
-        if (order == "0") {
-            return;
-        }
-
-        if (order == "1") { // 查看前20条（更早的消息）
-
-            // 如果当前没有更多消息，直接返回
-            if (!signal || down >= first) {
-
-                sendMsg(fd, "less");
-                continue;
-            }
-            
-            //前20
-            up += 20;
-            down += 20;
-
-            
-            //剩余<20。false
-            if (up >= first) {
-
-                signal = false;
-                sendMsg(fd, "more");
-                sendMsg(fd, to_string(first - 1));
-                sendMsg(fd, to_string(down));
-                
-                // 从MySQL数据中获取消息范围
-                int actualCount = first - down;
-                if (actualCount <= 0 || down >= (int)all_messages.size()) {
-                    sendMsg(fd, "less");
-                    continue;
-                }
-
-                // 从all_messages数组中获取指定范围的消息
-                int end_idx = min(first - 1, (int)all_messages.size() - 1);
-                for (int i = end_idx; i >= down && i >= 0; i--) {
-                    string msg_content = all_messages[i];
-                    try {
-                        json test_json = json::parse(msg_content);
-                        sendMsg(fd, msg_content);
-                    } catch (const exception& e) {
-                        continue;
-                    }
-                }
-                continue;
-            }
-            
-            //前20,剩余>20，true
-
-            signal = true;
-            sendMsg(fd, "more");
-            sendMsg(fd, to_string(up - 1));
-            sendMsg(fd, to_string(down));
-            
-            // 重新获取消息范围
-            int actualCount = up - down;
-            if (actualCount <= 0) {
-                sendMsg(fd, "less");
-                continue;
-            }
-            // 从MySQL数据中获取消息范围
-            int end_idx = min(up - 1, (int)all_messages.size() - 1);
-            for (int i = end_idx; i >= down && i >= 0; i--) {
-                string msg_content = all_messages[i];
-                try {
-                    json test_json = json::parse(msg_content);
-                    sendMsg(fd, msg_content);
-                } catch (const exception& e) {
-                    continue;
-                }
-            }
-            continue;
-                
-        } else if (order == "2") { // 查看后20条（更新的消息）
-
-            if (down <= 0) {
-
-                sendMsg(fd, "less");
-                continue;
-            }
-            
-            // 调整分页范围
-            up -= 20;
-            down -= 20;
-            if (down < 0) down = 0;
-            // 如果返回到最新页面，重新设置signal为true
-            if (down == 0) {
-                signal = true;
-
-            }
-
-            
-
-            sendMsg(fd, "more");
-            sendMsg(fd, to_string(up - 1));
-            sendMsg(fd, to_string(down));
-            
-            // 重新获取消息范围
-            int actualCount = up - down;
-            if (actualCount <= 0) {
-                sendMsg(fd, "less");
-                continue;
-            }
-            // 从MySQL数据中获取消息范围
-            int end_idx = min(up - 1, (int)all_messages.size() - 1);
-            for (int i = end_idx; i >= down && i >= 0; i--) {
-                string msg_content = all_messages[i];
-                try {
-                    json test_json = json::parse(msg_content);
-                    sendMsg(fd, msg_content);
-                } catch (const exception& e) {
-                    continue;
-                }
-            }
-            continue;
-        }
-    }
-}
-
-
-
-void start_chat(int fd, User &user) {
-    Redis redis;
-    redis.connect();
-    redis.sadd("is_chat", user.getUID());
-    string records_index;
-    //收历史记录索引
-    recvMsg(fd, records_index);
-    int num = redis.llen(records_index);
-    //发
-    if (num > 50) {
-        num = 50;
-    }
-    
-    sendMsg(fd, to_string(num));
-
-    redisReply **arr = redis.lrange(records_index, "0", to_string(num - 1));
-    //先发最新的消息，所以要倒序遍历
-    for (int i = num - 1; i >= 0; i--) {
-        string msg_content = arr[i]->str;
-        try {
-            json test_json = json::parse(msg_content);
-            //循环发信息
-            sendMsg(fd, msg_content);
-        } catch (const exception& e) {
-            continue;
-        }
-        freeReplyObject(arr[i]);
-    }
-    // 释放初始数组
-    if (arr != nullptr) {
-        free(arr);
-    }
-    string UID;
-    //接收客户端发送的想要聊天的好友的UID
-    recvMsg(fd, UID);
-    
-
-    //先检查删除，屏蔽，注销。与发给对方无关
-    string msg;
-    while (true) {
-        int ret = recvMsg(fd, msg);
-        if (ret <= 0) {
-            redis.srem("is_chat", user.getUID());
-            return;
-        }
-        
-        if (msg == EXIT) {
-            redis.srem("is_chat", user.getUID());
-            return;
-        }
-        //发文件的特殊检查
-        if (msg == "send" || msg == "recv") {
-            //删除
-            if (!redis.sismember(UID, user.getUID())) {
-
-                string me = user.getUID() + UID;
-                
-
-                string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
-                int receiver_fd = stoi(receiver_fd_str);
-                sendMsg(receiver_fd, "FRIEND_VERIFICATION_NEEDED");
-                sendMsg(fd,"fail");
-                
-                recvMsg(fd,msg);
-                redis.lpush(me, msg);
-                continue; 
-             }
-            //被屏蔽
-            if (redis.sismember("blocked" + UID, user.getUID())) {
-                string me = user.getUID() + UID;
-                
-                string receiver_fd_str = redis.hget("unified_receiver", user.getUID());//是给原客户端的通知线程发，不是UID,是GETUID()
-                int receiver_fd = stoi(receiver_fd_str);
-                sendMsg(receiver_fd, "BLOCKED_MESSAGE");
-                sendMsg(fd,"fail");
-
-                recvMsg(fd,msg);
-                redis.lpush(me, msg);
-                continue;
-            }
-            //注销
-            if (redis.sismember("deactivated_users", UID)) {
-                string me = user.getUID() + UID;
-        
-                string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
-                int receiver_fd = stoi(receiver_fd_str);
-                sendMsg(receiver_fd, "DEACTIVATED_MESSAGE");
-                sendMsg(fd,"fail");
-
-                recvMsg(fd,msg);
-                redis.lpush(me, msg);
-                continue;
-            }
-            //bug 三个if都没满足的时候，就会继续往下走！！ else要保底！！
-            else{
-                sendMsg(fd,"success");
-                continue;
-            }
-        }
-        //正常消息
-        
-        Message message;
-        try {
-            message.json_parse(msg);
-        } catch (const exception& e) {
-            cout << "[DEBUG] 正常消息之JSON解析失败，跳过消息: " << msg << endl;
-            continue;
-        }
-        
-        
-
-        // 检查是否被对方删除,删除和屏蔽==对方发消息给我，且我在聊天框
-        if (!redis.sismember(UID, user.getUID())) {
-            // 消息保存到发送者的历史记录中
-            string me = user.getUID() + UID;
-            redis.lpush(me, msg);
-
-            string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
-            int receiver_fd = stoi(receiver_fd_str);
-            sendMsg(receiver_fd, "FRIEND_VERIFICATION_NEEDED");
-            continue; 
-        }
-        // 被屏蔽
-        if (redis.sismember("blocked" + UID, user.getUID())) {
-            string me = user.getUID() + UID;
-            redis.lpush(me, msg);
-
-            string receiver_fd_str = redis.hget("unified_receiver", user.getUID());//是给原客户端的通知线程发，不是UID,是GETUID()
-            int receiver_fd = stoi(receiver_fd_str);
-            sendMsg(receiver_fd, "BLOCKED_MESSAGE");
-            continue;
-        }
-        
-        // 注销
-        if (redis.sismember("deactivated_users", UID)) {
-            string me = user.getUID() + UID;
-            redis.lpush(me, msg);
-
-            string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
-            int receiver_fd = stoi(receiver_fd_str);
-            sendMsg(receiver_fd, "DEACTIVATED_MESSAGE");
-            continue;
-        }
-        
-
-        //对方不在线
-        if (!redis.hexists("is_online", UID)) {
-            //历史
-            string me = message.getUidFrom() + message.getUidTo();
-            string her = message.getUidTo() + message.getUidFrom();
-            redis.lpush(me, msg);
-            redis.lpush(her, msg);
-
-            // 离线
-            redis.lpush("off_msg" + UID, message.getUsername());
-            cout << "[DEBUG] 用户 " << UID << " 离线，保存消息通知: " << message.getUsername() << endl;
-            continue;
-        }
-
-
-        //在线
-        // 我屏蔽，我发消息的功能————对于我，都是正常的，所以不用额外检查
-        bool is_chat = redis.sismember("is_chat", UID);
-        if (redis.hexists("unified_receiver", UID)) {
-            string receiver_fd_str = redis.hget("unified_receiver", UID);
-            
-                int receiver_fd = stoi(receiver_fd_str);
-
-                if (is_chat) {
-                    // 接收方在聊天中
-                    json test_json = json::parse(msg);
-                    sendMsg(receiver_fd, msg);
-                } else {
-                    // 不在聊天
-                    sendMsg(receiver_fd, "MESSAGE:" + message.getUsername());
-                }
-        } else {
-            cout << "[DEBUG] 未找到UID " << UID << " 的统一接收连接" << endl;
-        }
-        // 历史
-        string me = message.getUidFrom() + message.getUidTo();
-        string her = message.getUidTo() + message.getUidFrom();
-        redis.lpush(me, msg);
-        redis.lpush(her, msg);
-    }
-}
-
-
 
 void list_friend(int fd, User &user) {
     Redis redis;
@@ -740,13 +181,13 @@ void findRequest(int fd, User &user) {
                 //加上好友之后，我俩的好友申请列表里，都不会再出现对方了！！！
                 redis.srem(string(arr[i]->str) + "add_friend", user.getUID());
 
-                // ========== 新增：更新好友时间戳（模仿群聊逻辑） ==========
-                // 重新添加好友时，更新时间戳
+                // ========== 新增：设置好友加入时间戳 ==========
+                // 添加好友时，设置当前时间为加入时间
                 time_t now = time(nullptr);
                 redis.hset("friend_join_time", user.getUID() + "_" + string(arr[i]->str), to_string(now));
                 redis.hset("friend_join_time", string(arr[i]->str) + "_" + user.getUID(), to_string(now));
 
-                cout << "[DEBUG] 重新添加好友，更新时间戳: " << user.getUID() << " <-> " << arr[i]->str << "，时间: " << now << endl;
+                cout << "[DEBUG] 添加好友，设置加入时间戳: " << user.getUID() << " <-> " << arr[i]->str << "，时间: " << now << endl;
 
                 freeReplyObject(arr[i]);
                 continue;
@@ -776,12 +217,11 @@ void del_friend(int fd, User &user) {
     //删除我对他的屏蔽关系
     redis.srem("blocked" + user.getUID(), UID);
 
-    // ========== 新增：删除好友的逻辑（模仿群聊时间戳） ==========
+    // ========== 新增：删除好友的逻辑 ==========
 
-    // 记录删除时间戳（模仿群聊的user_join_time逻辑）
-    time_t now = time(nullptr);
-    redis.hset("friend_join_time", user.getUID() + "_" + UID, to_string(now));
-    cout << "[DEBUG] 用户 " << user.getUID() << " 删除了好友 " << UID << "，设置时间戳: " << now << endl;
+    // 清除好友加入时间记录，等待重新添加时设置新的时间戳
+    redis.hdel("friend_join_time", user.getUID() + "_" + UID);
+    cout << "[DEBUG] 用户 " << user.getUID() << " 删除了好友 " << UID << "，清除加入时间记录" << endl;
 
     // 移除通知机制 - 不再发送删除通知
     // redis.sadd(UID + "del", user.getUsername());
@@ -1462,20 +902,35 @@ void deactivateAccount(int fd, User &user) {
 
 
     
+    // ========== 新增：删除用户的所有私聊历史记录 ==========
+    MySQL mysql;
+    if (mysql.connect()) {
+        // 获取用户的所有好友
+        redisReply **friends_arr = redis.smembers(user.getUID());
+        int friends_count = redis.scard(user.getUID());
+
+        for (int i = 0; i < friends_count; i++) {
+            string friend_uid = friends_arr[i]->str;
+            // 删除与每个好友的私聊记录
+            mysql.deleteMessagesCompletely(user.getUID(), friend_uid);
+            cout << "[DEBUG] 已删除用户 " << user.getUID() << " 与 " << friend_uid << " 的私聊记录" << endl;
+            freeReplyObject(friends_arr[i]);
+        }
+        free(friends_arr);
+    }
+
     // 从在线状态中移除
     redis.hdel("is_online", user.getUID());
     redis.hdel("unified_receiver", user.getUID());
     redis.srem("is_chat", user.getUID());
 
-
-
-    cout << "[DEBUG] 用户 " << user.getUsername() << " 已注销" << endl;
+    cout << "[DEBUG] 用户 " << user.getUsername() << " 已注销，所有相关数据已清理" << endl;
 
 }
 
 // ========== MySQL版本的函数实现 ==========
 
-// MySQL版本的聊天功能（只改消息存储，好友检查还用Redis）
+// MySQL版本的聊天功能
 void start_chat_mysql(int fd, User &user) {
     Redis redis;
     redis.connect();
@@ -1510,13 +965,8 @@ void start_chat_mysql(int fd, User &user) {
 
     cout << "[DEBUG] 最终目标用户ID: " << target_user_id << endl;
 
-    // 先测试查询所有消息，看看数据库中有什么
-    cout << "[DEBUG] 测试查询所有消息..." << endl;
-    vector<string> all_msgs = mysql.getPrivateHistory("", "", 100);  // 查询所有消息
-    cout << "[DEBUG] 数据库中总共有 " << all_msgs.size() << " 条消息" << endl;
-
-    // 从MySQL获取历史消息
-    vector<string> history = mysql.getPrivateHistory(user.getUID(), target_user_id, 50);
+    // 从MySQL获取历史消息（使用时间戳0显示所有消息）
+    vector<string> history = mysql.getPrivateHistoryAfterTime(user.getUID(), target_user_id, 0, 50);
     int num = history.size();
     cout << "[DEBUG] start_chat_mysql: 获取到 " << num << " 条历史消息" << endl;
 
@@ -1529,17 +979,8 @@ void start_chat_mysql(int fd, User &user) {
 
     // 发送历史消息（倒序，最新的在前）
     for (int i = num - 1; i >= 0; i--) {
-        cout << "[DEBUG] start_chat_mysql: 发送历史消息 " << (num-i) << "/" << num << ": " << history[i] << endl;
-
-        // 现在history[i]应该已经是完整的JSON格式了，直接发送
-        // 和原来的Redis版本保持一致
-        try {
-            json test_json = json::parse(history[i]);
-            sendMsg(fd, history[i]);
-            cout << "[DEBUG] 发送JSON消息成功" << endl;
-        } catch (const exception& e) {
-            cout << "[DEBUG] JSON解析失败，跳过消息: " << history[i] << endl;
-        }
+        cout << "[DEBUG] start_chat_mysql: 发送历史消息 " << (num-i) << "/" << num << endl;
+        sendMsg(fd, history[i]);  // 直接发送JSON字符串，无需解析验证
     }
 
     // 开始接收新消息
@@ -1602,7 +1043,6 @@ void start_chat_mysql(int fd, User &user) {
         try {
             message.json_parse(msg);
             UID = message.getUidTo();
-            cout << "[DEBUG] JSON解析成功，目标用户: " << UID << endl;
         } catch (const exception& e) {
             cout << "[DEBUG] JSON解析失败，可能是纯文本消息: " << msg << endl;
             // 如果不是JSON，可能是纯文本消息，使用target_user_id作为目标用户
@@ -1613,10 +1053,7 @@ void start_chat_mysql(int fd, User &user) {
             message.setUsername(user.getUsername());
             cout << "[DEBUG] 处理为纯文本消息，目标用户: " << UID << endl;
         }
-
-        // 使用原来的Redis逻辑检查好友关系和屏蔽
-        // 重要：无论什么情况，都要保存消息到MySQL，这样发送者能看到自己的历史记录
-        // 只保存消息内容，不保存完整的JSON
+        //保存消息
         mysql.insertPrivateMessage(user.getUID(), UID, message.getContent());
 
         // 检查是否被对方删除
@@ -1681,7 +1118,7 @@ void start_chat_mysql(int fd, User &user) {
 }
 
 // MySQL版本的历史消息获取（智能过滤屏蔽消息）
-void F_history_mysql(int fd, User &user) {
+void F_history(int fd, User &user) {
     Redis redis;
     redis.connect();
     MySQL mysql;
@@ -1729,20 +1166,20 @@ void F_history_mysql(int fd, User &user) {
         return;
     }
 
-    // 检查是否有好友加入时间记录，如果有则只显示该时间之后的消息
+    // 检查好友加入时间，统一使用afterTime函数
     string friend_join_time_str = redis.hget("friend_join_time", user.getUID() + "_" + target_user_id);
-    vector<string> all_messages;
+    time_t join_time = 0;  // 默认为0，显示所有历史消息
 
     if (!friend_join_time_str.empty() && friend_join_time_str != "(nil)") {
-        // 有好友加入时间记录，只显示该时间之后的消息
-        time_t join_time = stoll(friend_join_time_str);
-        cout << "[DEBUG] 检测到好友加入时间: " << join_time << "，只显示之后的消息" << endl;
-        all_messages = mysql.getPrivateHistoryAfterTime(user.getUID(), target_user_id, join_time, 100);
+        //stolonglong
+        join_time = stoll(friend_join_time_str);
+        cout << "[DEBUG] 检测到好友加入时间: " << join_time << "，只显示加入后的消息" << endl;
     } else {
-        // 没有好友加入时间记录，显示所有历史消息
-        cout << "[DEBUG] 没有好友加入时间记录，显示所有历史消息" << endl;
-        all_messages = mysql.getPrivateHistory(user.getUID(), target_user_id, 100);
+        cout << "[DEBUG] 没有好友加入时间记录，显示所有历史消息（老朋友或第一次添加）" << endl;
     }
+
+    // 统一使用afterTime函数，时间戳为0时相当于显示所有消息
+    vector<string> all_messages = mysql.getPrivateHistoryAfterTime(user.getUID(), target_user_id, join_time, 100);
     cout << "[DEBUG] 从MySQL获取到 " << all_messages.size() << " 条原始消息" << endl;
 
     // 智能过滤消息：根据当前屏蔽状态过滤（使用已经获取的屏蔽状态）
@@ -1934,3 +1371,184 @@ void F_history_mysql(int fd, User &user) {
 }
 
 
+
+void G_history(int fd, User &user) {
+
+    Redis redis;
+    redis.connect();
+
+    MySQL mysql;
+    mysql.connect();
+
+    string group_id;
+    recvMsg(fd, group_id);
+
+    string records_index = group_id + "history";  // 保持原有变量名，用于兼容
+
+    // 检查用户加入群聊的时间，统一使用afterTime函数
+    string user_join_time_str = redis.hget("user_join_time", group_id + user.getUID());
+    time_t join_time = 0;  // 默认为0，显示所有历史消息
+
+    if (!user_join_time_str.empty() && user_join_time_str != "(nil)") {
+        join_time = stoll(user_join_time_str);
+        cout << "[DEBUG] 用户加入群聊时间: " << join_time << "，只显示加入后的消息" << endl;
+    } else {
+        cout << "[DEBUG] 没有加入时间记录，显示所有群聊历史消息（老成员或创建者）" << endl;
+    }
+
+    // 统一使用afterTime函数，时间戳为0时相当于显示所有消息
+    vector<string> all_messages = mysql.getGroupHistoryAfterTime(group_id, join_time, 1000);
+
+    int num = all_messages.size();
+
+    int up = 20;
+    int down = 0;
+    int first = num;
+    bool signal = false;
+
+    sendMsg(fd,redis.hget("user_join_time",group_id+user.getUID()));
+
+    if (num > 20) {
+        num = 20;
+        signal = true;
+    } else {
+        // 如果总数小于等于20，说明没有更多消息了
+        signal = false;
+    }
+    sendMsg(fd, to_string(num));
+
+    // 发送MySQL中的群聊历史消息（倒序，最新的在前）
+    for (int i = num - 1; i >= 0; i--) {
+        string msg_content = all_messages[i];
+        try {
+            json test_json = json::parse(msg_content);
+            sendMsg(fd, msg_content);
+        } catch (const exception& e) {
+            continue;
+        }
+    }
+    
+    // 发送总消息数给客户端，用于状态判断
+    sendMsg(fd, to_string(first));
+
+    string order;
+    while (true) {
+        recvMsg(fd, order);
+        if (order == "0") {
+            return;
+        }
+
+        if (order == "1") { // 查看前20条（更早的消息）
+
+            // 如果当前没有更多消息，直接返回
+            if (!signal || down >= first) {
+
+                sendMsg(fd, "less");
+                continue;
+            }
+            
+            //前20
+            up += 20;
+            down += 20;
+
+            
+            //剩余<20。false
+            if (up >= first) {
+
+                signal = false;
+                sendMsg(fd, "more");
+                sendMsg(fd, to_string(first - 1));
+                sendMsg(fd, to_string(down));
+                
+                // 从MySQL数据中获取消息范围
+                int actualCount = first - down;
+                if (actualCount <= 0 || down >= (int)all_messages.size()) {
+                    sendMsg(fd, "less");
+                    continue;
+                }
+
+                // 从all_messages数组中获取指定范围的消息
+                int end_idx = min(first - 1, (int)all_messages.size() - 1);
+                for (int i = end_idx; i >= down && i >= 0; i--) {
+                    string msg_content = all_messages[i];
+                    try {
+                        json test_json = json::parse(msg_content);
+                        sendMsg(fd, msg_content);
+                    } catch (const exception& e) {
+                        continue;
+                    }
+                }
+                continue;
+            }
+            
+            //前20,剩余>20，true
+
+            signal = true;
+            sendMsg(fd, "more");
+            sendMsg(fd, to_string(up - 1));
+            sendMsg(fd, to_string(down));
+            
+            // 重新获取消息范围
+            int actualCount = up - down;
+            if (actualCount <= 0) {
+                sendMsg(fd, "less");
+                continue;
+            }
+            // 从MySQL数据中获取消息范围
+            int end_idx = min(up - 1, (int)all_messages.size() - 1);
+            for (int i = end_idx; i >= down && i >= 0; i--) {
+                string msg_content = all_messages[i];
+                try {
+                    json test_json = json::parse(msg_content);
+                    sendMsg(fd, msg_content);
+                } catch (const exception& e) {
+                    continue;
+                }
+            }
+            continue;
+                
+        } else if (order == "2") { // 查看后20条（更新的消息）
+
+            if (down <= 0) {
+
+                sendMsg(fd, "less");
+                continue;
+            }
+            
+            // 调整分页范围
+            up -= 20;
+            down -= 20;
+            if (down < 0) down = 0;
+            // 如果返回到最新页面，重新设置signal为true
+            if (down == 0) {
+                signal = true;
+
+            }
+
+            
+
+            sendMsg(fd, "more");
+            sendMsg(fd, to_string(up - 1));
+            sendMsg(fd, to_string(down));
+            
+            // 重新获取消息范围
+            int actualCount = up - down;
+            if (actualCount <= 0) {
+                sendMsg(fd, "less");
+                continue;
+            }
+            // 从MySQL数据中获取消息范围
+            int end_idx = min(up - 1, (int)all_messages.size() - 1);
+            for (int i = end_idx; i >= down && i >= 0; i--) {
+                string msg_content = all_messages[i];
+                try {
+                    json test_json = json::parse(msg_content);
+                    sendMsg(fd, msg_content);
+                } catch (const exception& e) {
+                    continue;
+                }
+            }
+            continue;
+        }
+    }
+}

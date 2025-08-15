@@ -735,6 +735,11 @@ void serverRegisterWithCode(int epfd, int fd) {
         epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
         return;
     }
+    if (!redis.hset("uid_to_username", user.getUID(), username)) {
+        sendMsg(fd, "服务器内部错误");
+        epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
+        return;
+    }
     if (!redis.hset("username_to_uid", username, user.getUID())) {
         sendMsg(fd, "服务器内部错误");
         epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);

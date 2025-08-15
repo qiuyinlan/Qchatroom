@@ -28,7 +28,6 @@ add_executable(
         server/MySQL.cc
         server/group_chat.cc
         server/Threadpool.cpp
-        server/tool.cc
         server/IO.cc
         utils/User.cc
         utils/TCP.cc

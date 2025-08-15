@@ -25,10 +25,10 @@ void serverRegisterWithCode(int epfd, int fd);  //检查后，带着验证码注
 
 void handleResetCode(int epfd, int fd);
 
-void resetPasswordWithCode(int epfd, int fd);
+//void resetPasswordWithCode(int epfd, int fd);
 
 bool sendMail(const std::string& to_email, const std::string& code, bool is_find);
 
-void findPasswordWithCode(int epfd, int fd);
+//void findPasswordWithCode(int epfd, int fd);
 
 #endif  

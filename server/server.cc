@@ -412,23 +412,25 @@ int main(int argc, char *argv[]) {
                             }
                             pool.addTask([=](){ handleResetCode(epfd, fd); });
                             break;
-                        } else if (msg == RESET_PASSWORD_WITH_CODE) {
-                            epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                            int _flags = fcntl(fd, F_GETFL, 0);
-                            if (_flags != -1) {
-                                fcntl(fd, F_SETFL, _flags & ~O_NONBLOCK);
-                            }
-                            pool.addTask([=](){ resetPasswordWithCode(epfd, fd); });
-                            break;
-                        } else if (msg == FIND_PASSWORD_WITH_CODE) {
-                            epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
-                            int _flags = fcntl(fd, F_GETFL, 0);
-                            if (_flags != -1) {
-                                fcntl(fd, F_SETFL, _flags & ~O_NONBLOCK);
-                            }
-                            pool.addTask([=](){ findPasswordWithCode(epfd, fd); });
-                            break;
-                        }
+                        } 
+                        // else if (msg == RESET_PASSWORD_WITH_CODE) {
+                        //     epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        //     int _flags = fcntl(fd, F_GETFL, 0);
+                        //     if (_flags != -1) {
+                        //         fcntl(fd, F_SETFL, _flags & ~O_NONBLOCK);
+                        //     }
+                        //     pool.addTask([=](){ resetPasswordWithCode(epfd, fd); });
+                        //     break;
+                        // } 
+                        // else if (msg == FIND_PASSWORD_WITH_CODE) {
+                        //     epoll_ctl(epfd, EPOLL_CTL_DEL, ep[i].data.fd, nullptr);
+                        //     int _flags = fcntl(fd, F_GETFL, 0);
+                        //     if (_flags != -1) {
+                        //         fcntl(fd, F_SETFL, _flags & ~O_NONBLOCK);
+                        //     }
+                        //     pool.addTask([=](){ findPasswordWithCode(epfd, fd); });
+                        //     break;
+                        // }
                         else{
                             cout << "[DEBUG] 未知协议: '" << msg << "' (长度: " << msg.length() << ")" << endl;
                         }

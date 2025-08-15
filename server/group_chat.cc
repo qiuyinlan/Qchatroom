@@ -200,23 +200,34 @@ void GroupChat::startChat() {
         std::cout << "[ERROR] 问题JSON: " << group_info << std::endl;
         return;
     }
-    int num = redis.llen(group.getGroupUid() + "history");
+    // 从MySQL获取群聊历史消息
+    MySQL mysql;
+    vector<string> history;
+    if (mysql.connect()) {
+        // 获取用户加群时间
+        string user_join_time_str = redis.hget("user_join_time", group.getGroupUid() + user.getUID());
+        time_t join_time = 0;
 
+        if (!user_join_time_str.empty() && user_join_time_str != "(nil)") {
+            join_time = stoll(user_join_time_str);
+        }
+
+        history = mysql.getGroupHistoryAfterTime(group.getGroupUid(), join_time, 50);
+    }
+
+    int num = history.size();
     if (num > 50) {
         num = 50;
     }
-    
+
     sendMsg(fd, to_string(num));
 
     //加群时间
-    sendMsg(fd,redis.hget("user_join_time",group.getGroupUid()+user.getUID()));
-    if (num != 0) {
-        arr = redis.lrange(group.getGroupUid() + "history", "0", to_string(num - 1));
-    }
-    for (int i = num - 1; i >= 0; i--) {
+    sendMsg(fd, redis.hget("user_join_time", group.getGroupUid() + user.getUID()));
 
-        sendMsg(fd, arr[i]->str);
-        freeReplyObject(arr[i]);
+    // 发送历史消息（倒序，最新的在前）
+    for (int i = num - 1; i >= 0; i--) {
+        sendMsg(fd, history[i]);
     }
     string msg;
     Message message;
@@ -276,10 +287,7 @@ void GroupChat::startChat() {
         if (len == 0) {
             return;
         }
-        //先存到历史记录里面
-        redis.lpush(group.getGroupUid() + "history", msg);
-
-        // 同时存储到MySQL历史记录
+        // 只存储到MySQL历史记录，不再存储Redis
         MySQL mysql;
         if (mysql.connect()) {
             mysql.insertGroupMessage(group.getGroupUid(), user.getUID(), msg);
@@ -703,6 +711,13 @@ void GroupChat::deleteGroup(Group &group) {
     redis.del(group.getGroupUid() + "history");
     redis.srem("group_Name", group.getGroupName());
     redis.hdel("group_info", group.getGroupUid());
+
+    // ========== 新增：删除MySQL中的群聊消息 ==========
+    MySQL mysql;
+    if (mysql.connect()) {
+        mysql.deleteGroupMessages(group.getGroupUid());
+        cout << "[DEBUG] 解散群聊，已删除MySQL中的群聊消息: " << group.getGroupUid() << endl;
+    }
 
  }
 
