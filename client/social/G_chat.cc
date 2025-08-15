@@ -53,7 +53,6 @@ void G_chat::groupctrl(vector<pair<string, User>> &my_friends) {
             sendMsg(fd, BACK);
             return;
         }
-      
         else if (option == 1) {
             createGroup();
             continue;
@@ -105,7 +104,6 @@ void G_chat::syncGL(std::vector<Group> &joinedGroup) {
         cerr << "[ERROR] 接收群聊数量失败，连接可能断开" << endl;
         return;
     }
-
     int num = stoi(nums);
     if(num == 0){
         return;
@@ -156,7 +154,6 @@ void G_chat::sync(vector<Group> &createdGroup, vector<Group> &managedGroup, vect
 
     if (recv_ret <= 0) {
         cerr << "[ERROR] 接收创建群数量失败，连接可能断开" << endl;
-       
     }
 
     int num;
@@ -494,9 +491,6 @@ void G_chat::managed_Group(vector<Group> &managedGroup) const {
             } 
             
         }
-
-
-
     }
     else {
         while (true) {

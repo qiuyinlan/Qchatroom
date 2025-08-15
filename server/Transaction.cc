@@ -881,7 +881,7 @@ void deactivateAccount(int fd, User &user) {
             redis.srem("group_Name", group.getGroupName());
             redis.hdel("group_info", group.getGroupUid());
 
-            // ========== 新增：删除MySQL中的群聊消息 ==========
+            //删除MySQL中的群聊消息
             MySQL mysql;
             if (mysql.connect()) {
                 mysql.deleteGroupMessages(group.getGroupUid());
@@ -902,7 +902,7 @@ void deactivateAccount(int fd, User &user) {
 
 
     
-    // ========== 新增：删除用户的所有私聊历史记录 ==========
+    // 删除用户的所有私聊历史记录
     MySQL mysql;
     if (mysql.connect()) {
         // 获取用户的所有好友
@@ -928,9 +928,7 @@ void deactivateAccount(int fd, User &user) {
 
 }
 
-// ========== MySQL版本的函数实现 ==========
-
-// MySQL版本的聊天功能
+// MySQL聊天
 void start_chat_mysql(int fd, User &user) {
     Redis redis;
     redis.connect();
@@ -1117,7 +1115,7 @@ void start_chat_mysql(int fd, User &user) {
     }
 }
 
-// MySQL版本的历史消息获取（智能过滤屏蔽消息）
+// MySQL版本的历史消息获取（
 void F_history(int fd, User &user) {
     Redis redis;
     redis.connect();
@@ -1155,9 +1153,6 @@ void F_history(int fd, User &user) {
     bool i_blocked_him = redis.sismember("blocked" + user.getUID(), target_user_id);
     bool he_blocked_me = redis.sismember("blocked" + target_user_id, user.getUID());
 
-    cout << "[DEBUG] 关系检查 - 是好友: " << (is_friend ? "是" : "否")
-         << ", 我屏蔽对方: " << (i_blocked_him ? "是" : "否")
-         << ", 对方屏蔽我: " << (he_blocked_me ? "是" : "否") << endl;
 
     // 修改逻辑：如果不是好友且没有屏蔽关系，才拒绝查询
     if (!is_friend && !i_blocked_him && !he_blocked_me) {
@@ -1346,25 +1341,7 @@ void F_history(int fd, User &user) {
             continue;
         }
 
-        // 兼容旧的"more"请求
-        if (order == "more") {
-            if (signal) {
-                int start_index = up;
-                int new_count = filtered_messages.size() - start_index;
-                if (new_count > 0 && start_index < filtered_messages.size()) {
-                    int actual_count = min(20, new_count);
-                    sendMsg(fd, to_string(actual_count));
-                    for (int i = start_index + actual_count - 1; i >= start_index; i--) {
-                        sendMsg(fd, filtered_messages[i]);
-                    }
-                    up += 20;
-                } else {
-                    sendMsg(fd, "less");
-                }
-            } else {
-                sendMsg(fd, "less");
-            }
-        } else if (order == "exit") {
+        if (order == "exit") {
             break;
         }
     }
