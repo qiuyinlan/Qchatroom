@@ -25,7 +25,6 @@ extern int recvMsgET(int fd, std::string &msg);
 #include <vector>
 #include "./group_chat.h"
 #include "../client/service/Notifications.h"
-#include "tools.h"
 
 using namespace std;
 using json = nlohmann::json;
@@ -217,9 +216,7 @@ void serverOperation(int fd, User &user) {
     while (true) {
         //接收用户输入的操作
         ret = recvMsg(fd, temp);
-        if (!c_break(ret, fd, user)) {
-            return;
-        }
+       
         if (temp == BACK ) {
             cout << "收到客户端在主页退出，成功" << endl ;
 
@@ -253,7 +250,7 @@ void serverOperation(int fd, User &user) {
             GroupChat groupChat(fd, user);
             groupChat.startChat();
         }  else if (temp == "F_HISTORY") {
-            F_history_mysql(fd, user);  // 只有历史消息获取用MySQL
+            F_history(fd, user);  // 只有历史消息获取用MySQL
         }  else if (temp == "G_HISTORY") {
             G_history(fd, user);  // 群聊历史保持Redis版本
         }  else if (temp == DEACTIVATE_ACCOUNT) {
@@ -754,87 +751,87 @@ void serverRegisterWithCode(int epfd, int fd) {
     epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
 }
 
-void resetPasswordWithCode(int epfd, int fd) {
-    struct epoll_event temp;
-    temp.data.fd = fd;
-    temp.events = EPOLLIN;
-    string json_str;
-    recvMsg(fd, json_str);
-    json root = json::parse(json_str);
-    string email = root["email"].get<string>();
-    string code = root["code"].get<string>();
-    string password = root["password"].get<string>();
-    Redis redis;
-    redis.connect();
-    string real_code = redis.hget("reset_code", email);
-    if (real_code != code) {
-        sendMsg(fd, "验证码错误");
-        epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
-        return;
-    }
-    // 检查用户是否存在
-    if (!redis.hexists("email_to_uid", email)) {
-        sendMsg(fd, "该邮箱未注册");
-        epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
-        return;
-    }
-    string UID = redis.hget("email_to_uid", email);
-    string user_info = redis.hget("user_info", UID);
-    User user;
-    user.json_parse(user_info);
-    user.setPassword(password);
-    redis.hset("user_info", UID, user.to_json());
-    sendMsg(fd, "密码重置成功");
-    epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
-}
+// void resetPasswordWithCode(int epfd, int fd) {
+//     struct epoll_event temp;
+//     temp.data.fd = fd;
+//     temp.events = EPOLLIN;
+//     string json_str;
+//     recvMsg(fd, json_str);
+//     json root = json::parse(json_str);
+//     string email = root["email"].get<string>();
+//     string code = root["code"].get<string>();
+//     string password = root["password"].get<string>();
+//     Redis redis;
+//     redis.connect();
+//     string real_code = redis.hget("reset_code", email);
+//     if (real_code != code) {
+//         sendMsg(fd, "验证码错误");
+//         epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
+//         return;
+//     }
+//     // 检查用户是否存在
+//     if (!redis.hexists("email_to_uid", email)) {
+//         sendMsg(fd, "该邮箱未注册");
+//         epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
+//         return;
+//     }
+//     string UID = redis.hget("email_to_uid", email);
+//     string user_info = redis.hget("user_info", UID);
+//     User user;
+//     user.json_parse(user_info);
+//     user.setPassword(password);
+//     redis.hset("user_info", UID, user.to_json());
+//     sendMsg(fd, "密码重置成功");
+//     epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
+// }
 
-void findPasswordWithCode(int epfd, int fd) {
-    struct epoll_event temp;
-    temp.data.fd = fd;
-    temp.events = EPOLLIN;
-    string json_str;
-    recvMsg(fd, json_str);
-    nlohmann::json root;
-    try {
-        root = nlohmann::json::parse(json_str);
-    } catch (const nlohmann::json::exception& e) {
-        sendMsg(fd, "JSON 格式错误");
-        epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
-        return;
-    }
-    string email = root["email"].get<string>();
-    string code = root["code"].get<string>();
-    Redis redis;
-    redis.connect();
-    string real_code = redis.hget("reset_code", email);
-    if (real_code != code) {
-        sendMsg(fd, "验证码错误");
-        epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
-        return;
-    }
-    // 检查用户是否存在
-    if (!redis.hexists("email_to_uid", email)) {
-        sendMsg(fd, "该邮箱未注册");
-        epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
-        return;
-    }
-    string UID = redis.hget("email_to_uid", email);
-    string user_info = redis.hget("user_info", UID);
-    nlohmann::json user_json;
-    try {
-        user_json = nlohmann::json::parse(user_info);
-    } catch (const nlohmann::json::exception& e) {
-        sendMsg(fd, "用户信息损坏");
-        epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
-        return;
-    }
-    if (!user_json.contains("password")) {
-        sendMsg(fd, "未找到密码信息");
-        epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
-        return;
-    }
-    string password = user_json["password"].get<string>();
-    sendMsg(fd, "你的密码是: " + password);
-    epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
-}
+// void findPasswordWithCode(int epfd, int fd) {
+//     struct epoll_event temp;
+//     temp.data.fd = fd;
+//     temp.events = EPOLLIN;
+//     string json_str;
+//     recvMsg(fd, json_str);
+//     nlohmann::json root;
+//     try {
+//         root = nlohmann::json::parse(json_str);
+//     } catch (const nlohmann::json::exception& e) {
+//         sendMsg(fd, "JSON 格式错误");
+//         epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
+//         return;
+//     }
+//     string email = root["email"].get<string>();
+//     string code = root["code"].get<string>();
+//     Redis redis;
+//     redis.connect();
+//     string real_code = redis.hget("reset_code", email);
+//     if (real_code != code) {
+//         sendMsg(fd, "验证码错误");
+//         epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
+//         return;
+//     }
+//     // 检查用户是否存在
+//     if (!redis.hexists("email_to_uid", email)) {
+//         sendMsg(fd, "该邮箱未注册");
+//         epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
+//         return;
+//     }
+//     string UID = redis.hget("email_to_uid", email);
+//     string user_info = redis.hget("user_info", UID);
+//     nlohmann::json user_json;
+//     try {
+//         user_json = nlohmann::json::parse(user_info);
+//     } catch (const nlohmann::json::exception& e) {
+//         sendMsg(fd, "用户信息损坏");
+//         epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
+//         return;
+//     }
+//     if (!user_json.contains("password")) {
+//         sendMsg(fd, "未找到密码信息");
+//         epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
+//         return;
+//     }
+//     string password = user_json["password"].get<string>();
+//     sendMsg(fd, "你的密码是: " + password);
+//     epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
+// }
 

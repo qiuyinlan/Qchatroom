@@ -6,7 +6,6 @@
 #include "Group.h"
 #include "proto.h"
 #include "Transaction.h"
-#include "tools.h"
 
 #include <iostream>
 
@@ -237,9 +236,7 @@ void GroupChat::startChat() {
 
             if (ret == 0) {
                 cout << "[DEBUG] 群聊中检测到连接断开" << endl;
-                if (!c_break(ret, fd, user)) {
-                    return;
-                }
+               
             }
             redis.srem("group_chat", user.getUID());
 
@@ -328,7 +325,7 @@ void GroupChat::startChat() {
             }
             freeReplyObject(arr[i]);
         }
- cout << "333" << endl;
+        
     }
 }
 

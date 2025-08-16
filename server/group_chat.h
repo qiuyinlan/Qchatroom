@@ -4,6 +4,7 @@
 #define CHATROOM_GROUP_CHAT_H
 
 #include <utility>
+#include <string>
 
 #include "User.h"
 #include "Group.h"
