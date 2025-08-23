@@ -12,14 +12,42 @@
 using namespace std;
 
 
+void GroupChat::sync(int fd, User &user) {
+    Redis redis;
+    redis.connect();
+    nlohmann::json res;
+    res["flag"] = S2C_SYNC_GROUPS_RESPONSE;
+
+    auto get_groups = [&](const string& key, const string& json_key) {
+        redisReply *arr = redis.smembers(key);
+        if (arr != nullptr) {
+            for (size_t i = 0; i < arr->elements; ++i) {
+                if (arr->element[i] != nullptr && arr->element[i]->str != nullptr) {
+                    string group_info = redis.hget("group_info", arr->element[i]->str);
+                    if (!group_info.empty()) {
+                        res["data"][json_key].push_back(nlohmann::json::parse(group_info));
+                    }
+                }
+            }
+            freeReplyObject(arr);
+        }
+    };
+
+    get_groups("created" + user.getUID(), "created_groups");
+    get_groups("managed" + user.getUID(), "managed_groups");
+    get_groups("joined" + user.getUID(), "joined_groups");
+
+    sendMsg(fd, res.dump());
+}
+
 void GroupChat::group(int fd, User &user) {
     std::cout << "[DEBUG] group() 函数开始" << std::endl;
     Redis redis;
     redis.connect();
     GroupChat groupChat(fd, user);
-  
+
     string choice;
-    
+
     int ret;
     string reply;
     while (true) {
@@ -41,7 +69,7 @@ void GroupChat::group(int fd, User &user) {
         try {
             int option = stoi(choice);
             std::cout << "[DEBUG] 解析选择为数字: " << option << std::endl;
-             
+
             if (option == 1) {
                 groupChat.createGroup();
                 continue;
@@ -90,7 +118,7 @@ void GroupChat::synchronizeGL(int fd, User &user) {
 
     //发送群聊数量
     sendMsg(fd, to_string(num));
-   
+
     //发送群info
     if (num != 0) {
         redisReply *arr = redis.smembers(joined);
@@ -110,12 +138,12 @@ void GroupChat::synchronizeGL(int fd, User &user) {
         }
     }
    cout << "synchronizeGL同步群聊列表结束" << endl;
-    
-}    
+
+}
 
 //同步群数量
 void GroupChat::sync() {
-    
+
     Redis redis;
     redis.connect();
     //发送创建的群数量
@@ -125,8 +153,8 @@ void GroupChat::sync() {
         std::cerr << "[ERROR] 同步创建群数量sendMsg() 失败" << std::endl;
         return;
     }
-   
-    
+
+
     if(num > 0 ) {
         redisReply *arr = redis.smembers(created);
         if (arr != nullptr) {
@@ -178,12 +206,12 @@ void GroupChat::startChat() {
     redisReply *arr;
     int ret;
     recvMsg(fd, group_info);
-    
-    
+
+
     Group group;
     try {
         group.json_parse(group_info);
-        
+
     } catch (const std::exception& e) {
         std::cout << "[ERROR] 群聊信息解析失败: " << e.what() << std::endl;
         std::cout << "[ERROR] 问题JSON: " << group_info << std::endl;
@@ -226,7 +254,7 @@ void GroupChat::startChat() {
 
             if (ret == 0) {
                 cout << "[DEBUG] 群聊中检测到连接断开" << endl;
-               
+
             }
             redis.srem("group_chat", user.getUID());
 
@@ -309,7 +337,7 @@ void GroupChat::startChat() {
             }
             freeReplyObject(arr);
         }
-        
+
     }
 }
 
@@ -353,8 +381,8 @@ void GroupChat::createGroup() {
     int ret;
 
     while(true){
-       ret = recvMsg(fd, groupName);  
-       
+       ret = recvMsg(fd, groupName);
+
         if (groupName == BACK) {
             return;
         }
@@ -366,7 +394,7 @@ void GroupChat::createGroup() {
             break;
         }
     }
-    
+
 
     recvMsg(fd, group_info);
     Group group;
@@ -390,7 +418,7 @@ void GroupChat::joinGroup() {
     int ret;
     //接收客户端发送的群聊名称
     recvMsg(fd, groupName);
-    
+
 cout << "收到客户端发送的群聊名称" << groupName << endl;
     if (groupName == BACK) {
         return;
@@ -475,12 +503,12 @@ void GroupChat::managedGroup() const {
              //撤销管理员
                revokeAdmin(group);
                 return ;
-           
+
         } else if (choice == "5") {
            //解散群聊
                 deleteGroup(group);
                 return;
-            
+
         }
     }
 }
@@ -737,7 +765,7 @@ void GroupChat::getperson(){
 
     recvMsg(fd,userUID);
     recvMsg(fd,group_info);
-    
+
     if (group_info == "0") {
         return;
     }
@@ -755,11 +783,11 @@ void GroupChat::getperson(){
             continue;
         }
         if (!redis.sismember(userUID, UID)) {
-            sendMsg(fd, "-1"); 
+            sendMsg(fd, "-1");
             continue;
         }
         if (!redis.sismember(UID, userUID)){
-            sendMsg(fd, "-1"); 
+            sendMsg(fd, "-1");
             continue;
         }
         else if (redis.sismember("deactivated_users", UID)) {
@@ -779,5 +807,5 @@ void GroupChat::getperson(){
         redis.hset("user_join_time", group.getGroupUid()+UID, user.get_time());
         redis.sadd("joined" + UID, group.getGroupUid());
         redis.sadd(group.getMembers(), UID);
-        
+
 }

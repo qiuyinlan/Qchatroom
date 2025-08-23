@@ -141,7 +141,37 @@ void clientOperation(int fd, User &user) {
         } else if (opt == 6) {
             friendManager.unblocked(my_friends);
         } else if (opt == 7) {
-            gChat.groupctrl(my_friends);
+            json req;
+            req["flag"] = C2S_GET_CHAT_LISTS;
+            if (sendMsg(fd, req.dump()) <= 0) {
+                cout << "服务器连接已断开，无法进入群聊菜单" << endl;
+                continue;
+            }
+
+            string res_str;
+            if (recvMsg(fd, res_str) <= 0) {
+                cout << "服务器连接已断开，获取群聊列表失败" << endl;
+                continue;
+            }
+
+            try {
+                json res = json::parse(res_str);
+                if (res.value("flag", 0) == S2C_CHAT_LISTS_RESPONSE) {
+                    vector<Group> joinedGroup;
+                    if (res["data"].contains("groups")) {
+                        for (const auto& group_json : res["data"]["groups"]) {
+                            Group group;
+                            group.json_parse(group_json.dump());
+                            joinedGroup.push_back(group);
+                        }
+                    }
+                    gChat.groupctrl(my_friends);
+                } else {
+                    cout << "进入群聊菜单失败: " << res["data"].value("reason", "未知错误") << endl;
+                }
+            } catch (const json::parse_error& e) {
+                cerr << "解析群聊列表响应失败: " << e.what() << endl;
+            }
         } else if (opt == 8) {
             vector<Group> joinedGroup;
             friendManager.listFriends(my_friends, joinedGroup);

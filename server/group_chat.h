@@ -15,9 +15,11 @@ public:
     GroupChat() = default;
 
     GroupChat(int fd, const User &user);
+    static void sync(int fd, User &user);
+
 
     void group(int fd, User &user);
-    
+
     void synchronizeGL(int fd, User &user) ;
 
     void sync();

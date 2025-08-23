@@ -29,7 +29,7 @@ void G_chat::groupMenu() {
 void G_chat::groupctrl(vector<pair<string, User>> &my_friends) {
     vector<Group> joinedGroup;
     syncGL(joinedGroup);
-    sendMsg(fd, GROUP);
+
     vector<Group> managedGroup;
     vector<Group> createdGroup;
     
@@ -51,7 +51,7 @@ void G_chat::groupctrl(vector<pair<string, User>> &my_friends) {
         cin.ignore(INT32_MAX, '\n');
      
         if (option == 0) {
-            sendMsg(fd, BACK);
+
             return;
         }
         else if (option == 1) {
@@ -91,177 +91,90 @@ G_chat::G_chat(int fd, const User &user) : fd(fd), user(user) {
 
 void G_chat::syncGL(std::vector<Group> &joinedGroup) {
     joinedGroup.clear();
-    // 发送群聊列表获取请求
     nlohmann::json req;
     req["flag"] = C2S_GET_JOINED_GROUPS_REQUEST;
-    int ret = sendMsg(fd, req.dump());
-    if (ret <= 0) {
+    if (sendMsg(fd, req.dump()) <= 0) {
         cerr << "[ERROR] 发送同步群聊列表请求失败" << endl;
         return;
     }
-    string nums;
 
-    //接受群聊数量
-    int recv_ret = recvMsg(fd, nums);
-    if (recv_ret <= 0) {
-        cerr << "[ERROR] 接收群聊数量失败，连接可能断开" << endl;
+    string response_str;
+    if (recvMsg(fd, response_str) <= 0) {
+        cerr << "[ERROR] 接收群聊列表响应失败" << endl;
         return;
     }
-    int num = stoi(nums);
-    if(num == 0){
-        return;
-        //如果要同步三个，就不能直接返回了。直接返回——没有东西被push进数组，数组为空
-    }
-    string group_info;
-    //接收群info
 
-    for (int i = 0; i < num; i++) {
-        Group group;
-
-        //接收群聊,如果有群聊,就要json解析，没有直接return
-        int ret = recvMsg(fd, group_info);
-        if(ret <= 0){
-            cerr << "[ERROR] 接收群聊名称失败，连接可能断开" << endl;
-            return;
-        }
-        try {
-            if (group_info == "0" ) {
-                return;
+    try {
+        auto res = nlohmann::json::parse(response_str);
+        if (res.value("flag", 0) == S2C_JOINED_GROUPS_RESPONSE && res.value("data", nlohmann::json::object()).value("success", false)) {
+            if (res["data"].contains("joined_groups")) {
+                for (const auto& group_json : res["data"]["joined_groups"]) {
+                    Group group;
+                    group.json_parse(group_json.dump());
+                    joinedGroup.push_back(group);
+                }
             }
-            
-            group.json_parse(group_info);
-            joinedGroup.push_back(group);
-        } catch (const exception& e) {
-            cerr << "[ERROR] 创建的群JSON解析失败: " << e.what() << endl;
-            cerr << "[ERROR] 问题JSON: " << group_info << endl;
-            throw; 
+        } else {
+            cerr << "[ERROR] 获取已加入群聊列表失败: " << res.dump(2) << endl;
         }
-
+    } catch (const nlohmann::json::parse_error& e) {
+        cerr << "[ERROR] 解析已加入群聊列表响应失败: " << e.what() << endl;
     }
-
 }
 
 
 
 void G_chat::sync(vector<Group> &createdGroup, vector<Group> &managedGroup, vector<Group> &joinedGroup) const {
-    //sendMsg(fd,"sync");
     createdGroup.clear();
     managedGroup.clear();
     joinedGroup.clear();
 
-
-    string nums;
-
-    //得到群聊数量
-    int recv_ret = recvMsg(fd, nums);
-
-    if (recv_ret <= 0) {
-        cerr << "[ERROR] 接收创建群数量失败，连接可能断开" << endl;
+    nlohmann::json req;
+    req["flag"] = C2S_SYNC_GROUPS_REQUEST;
+    if (sendMsg(fd, req.dump()) <= 0) {
+        cerr << "[ERROR] 发送群组同步请求失败" << endl;
+        return;
     }
 
-    int num;
+    string response_str;
+    if (recvMsg(fd, response_str) <= 0) {
+        cerr << "[ERROR] 接收群组列表响应失败" << endl;
+        return;
+    }
+
     try {
-        if (nums.empty()) {
-            cerr << "[ERROR] 接收到空的创建群数量" << endl;
-            throw runtime_error("接收到空数据");
-        }
-        num = stoi(nums);
-        if (num < 0 || num > 1000) {
-            cerr << "[ERROR] 创建群数量异常: " << num << endl;
-            throw runtime_error("数据异常");
-        }
-    } catch (const exception& e) {
-        cerr << "[ERROR] 解析创建群数量失败: " << e.what() << ", 内容: '" << nums << "'" << endl;
-        throw;
-    }
-    string group_info;
-    for (int i = 0; i < num; i++) {
-        Group group;
-
-        recvMsg(fd, group_info);
-        try {
-            // 验证JSON格式
-            if (group_info.empty() || group_info[0] != '{' || group_info.back() != '}') {
-                cerr << "[ERROR] 接收到无效的JSON格式: " << group_info << endl;
-                throw runtime_error("JSON格式错误");
+        auto res = nlohmann::json::parse(response_str);
+        if (res.value("flag", 0) == S2C_SYNC_GROUPS_RESPONSE) {
+            if (res.contains("data")) {
+                auto& data = res["data"];
+                if (data.contains("created_groups")) {
+                    for (const auto& group_json : data["created_groups"]) {
+                        Group group;
+                        group.json_parse(group_json.dump());
+                        createdGroup.push_back(group);
+                    }
+                }
+                if (data.contains("managed_groups")) {
+                    for (const auto& group_json : data["managed_groups"]) {
+                        Group group;
+                        group.json_parse(group_json.dump());
+                        managedGroup.push_back(group);
+                    }
+                }
+                if (data.contains("joined_groups")) {
+                    for (const auto& group_json : data["joined_groups"]) {
+                        Group group;
+                        group.json_parse(group_json.dump());
+                        joinedGroup.push_back(group);
+                    }
+                }
             }
-            group.json_parse(group_info);
-            createdGroup.push_back(group);
-        } catch (const exception& e) {
-            cerr << "[ERROR] 创建的群JSON解析失败: " << e.what() << endl;
-            cerr << "[ERROR] 问题JSON: " << group_info << endl;
-            throw; // 重新抛出异常，让上层处理
+        } else {
+            cerr << "[ERROR] 无效的群组同步响应: " << res.dump(2) << endl;
         }
+    } catch (const nlohmann::json::parse_error& e) {
+        cerr << "[ERROR] 解析群组列表响应失败: " << e.what() << endl;
     }
-    //收
-    recv_ret = recvMsg(fd, nums);
-
-    if (recv_ret <= 0) {
-        cerr << "[ERROR] 接收管理群数量失败，连接可能断开" << endl;
-        throw runtime_error("网络连接错误");
-    }
-
-    try {
-        if (nums.empty()) {
-            cerr << "[ERROR] 接收到空的管理群数量" << endl;
-            throw runtime_error("接收到空数据");
-        }
-        num = stoi(nums);
-        if (num < 0 || num > 1000) {
-            cerr << "[ERROR] 管理群数量异常: " << num << endl;
-            throw runtime_error("数据异常");
-        }
-    } catch (const exception& e) {
-        cerr << "[ERROR] 解析管理群数量失败: " << e.what() << ", 内容: '" << nums << "'" << endl;
-        throw;
-    }
-    for (int i = 0; i < num; i++) {
-        Group group;
-
-        recvMsg(fd, group_info);
-        try {
-            group.json_parse(group_info);
-            managedGroup.push_back(group);
-        } catch (const exception& e) {
-            cerr << "[ERROR] 管理的群JSON解析失败: " << e.what() << endl;
-            cerr << "[ERROR] 问题JSON: " << group_info << endl;
-        }
-    }
-    //收
-    recv_ret = recvMsg(fd, nums);
-
-    if (recv_ret <= 0) {
-        cerr << "[ERROR] 接收加入群数量失败，连接可能断开" << endl;
-        throw runtime_error("网络连接错误");
-    }
-
-    try {
-        if (nums.empty()) {
-            cerr << "[ERROR] 接收到空的加入群数量" << endl;
-            throw runtime_error("接收到空数据");
-        }
-        num = stoi(nums);
-        if (num < 0 || num > 1000) {
-            cerr << "[ERROR] 加入群数量异常: " << num << endl;
-            throw runtime_error("数据异常");
-        }
-    } catch (const exception& e) {
-        cerr << "[ERROR] 解析加入群数量失败: " << e.what() << ", 内容: '" << nums << "'" << endl;
-        throw;
-    }
-    for (int i = 0; i < num; i++) {
-        Group group;
-
-        recvMsg(fd, group_info);
-        try {
-            group.json_parse(group_info);
-            joinedGroup.push_back(group);
-        } catch (const exception& e) {
-            cerr << "[ERROR] 加入的群JSON解析失败: " << e.what() << endl;
-            cerr << "[ERROR] 问题JSON: " << group_info << endl;
-        }
-    }
-
 }
 
 
@@ -405,16 +318,14 @@ void G_chat::managed_Group(vector<Group> &managedGroup) const {
 
         Group& selected_group = local_managed_groups[which - 1];
 
-        // TODO: 将下面的管理操作也迁移到JSON协议
-        sendMsg(fd, "3"); // 发送旧的管理群组信号，以便服务器进入旧的处理流程
-        sendMsg(fd, selected_group.to_json());
+        // The following management operations have been migrated to the JSON protocol.
 
         if (selected_group.getOwnerUid() == user.getUID()) {
             ownerMenu();
             int choice;
             cin >> choice;
             cin.ignore(INT32_MAX, '\n');
-            if (choice == 0) { sendMsg(fd, BACK); return; }
+            if (choice == 0) return;
                         if (choice == 1) approve(selected_group);
             else if (choice == 2) remove(selected_group);
             else if (choice == 3) appointAdmin(selected_group);
@@ -425,7 +336,7 @@ void G_chat::managed_Group(vector<Group> &managedGroup) const {
             int choice;
             cin >> choice;
             cin.ignore(INT32_MAX, '\n');
-            if (choice == 0) { sendMsg(fd, BACK); return; }
+            if (choice == 0) return;
                         if (choice == 1) approve(selected_group);
             else if (choice == 2) remove(selected_group);
         }

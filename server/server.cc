@@ -29,6 +29,7 @@
 #include "LoginHandler.h"
 #include "IO.h"
 #include "Group.h"
+#include "group_chat.h"
 #include "FileTransferState.h"
 
 using namespace std;
@@ -311,6 +312,8 @@ int main(int argc, char *argv[]) {
                     fcntl(connfd, F_SETFL, flag);
 
                     // Add to epoll
+
+
                     temp.events = EPOLLIN | EPOLLET;
 
                     temp.data.fd = connfd;
@@ -421,6 +424,8 @@ void handleWriteEvent(int epfd, int fd) {
                     // Kernel buffer full, seek back and wait for next EPOLLOUT
                     state.read_stream.seekg(-bytes_read, ios_base::cur);
                     return;
+
+
                 } else {
                     cerr << "[文件] fd=" << fd << " send错误, errno=" << errno << endl;
                     handleCloseEvent(epfd, fd);
@@ -461,6 +466,8 @@ void handleWriteEvent(int epfd, int fd) {
             } else {
                 if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
                     return;
+
+
                 }
                 cerr << "[ERROR] fd=" << fd << " 上发生send错误, errno=" << errno << endl;
                 handleCloseEvent(epfd, fd);
@@ -646,6 +653,23 @@ void handleMessage(int epfd, int fd, const std::string& json_msg) {
                 handleGetHistoryRequest(epfd, fd, msg);
                 break;
             }
+            case C2S_SYNC_GROUPS_REQUEST: {
+                string uid = getUidByFd(fd);
+                if (!uid.empty()) {
+                    Redis redis;
+                    if (redis.connect()) {
+                        User user;
+                        string user_info_str = redis.hget("user_info", uid);
+                        if (!user_info_str.empty()) {
+                            user.json_parse(user_info_str);
+                            cout << "[业务] 处理fd=" << fd << " 的同步群组列表请求" << endl;
+                            GroupChat::sync(fd, user);
+                        }
+                    }
+                }
+                break;
+            }
+
 
 
             case C2S_SEND_FILE_REQUEST:{
