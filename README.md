@@ -1,3 +1,6 @@
+# 答辩总结
+https://blog.csdn.net/qq_68631464/article/details/150647915?sharetype=blogdetail&sharerId=150647915&sharerefer=PC&sharesource=qq_68631464&spm=1011.2480.3001.8118
+
 # 一个多人聊天室项目
 
 一个基于C++17开发的高性能、多功能聊天系统，支持私聊、群聊、文件传输等功能。采用现代化的架构设计，使用Redis和MySQL双存储策略，支持高并发连接。

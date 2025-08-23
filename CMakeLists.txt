@@ -23,12 +23,18 @@ add_executable(
         server.out
         server/server.cc
         server/LoginHandler.cc
+        server/ServerState.cc
         server/Transaction.cc
         server/Redis.cc
         server/MySQL.cc
         server/group_chat.cc
         server/Threadpool.cpp
         server/IO.cc
+        server/handlers/GroupHandlers.cc
+        server/handlers/FriendHandlers.cc
+        server/handlers/UserHandlers.cc
+        server/handlers/ChatHandlers.cc
+        server/handlers/FileHandlers.cc
         utils/User.cc
         utils/TCP.cc
         utils/proto.cc
@@ -45,7 +51,7 @@ add_executable(
         client/service/FileTransfer.cc
         client/service/Notifications.cc
         client/social/FriendManager.cc
-  
+
         client/social/chat.cc
         client/social/G_chat.cc
         utils/User.cc
