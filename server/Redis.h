@@ -23,7 +23,7 @@ public:
     bool sadd(const std::string &key, const std::string &value);
     bool sismember(const std::string &key, const std::string &value);
     int scard(const std::string &key);
-    redisReply **smembers(const std::string &key);
+    redisReply *smembers(const std::string &key);
     void srem(const std::string &key, const std::string &value);
     std::string hget(const std::string &key, const std::string &field);
     // 确保声明了 hset 方法

@@ -33,23 +33,24 @@ void synchronize(int fd, User &user) {
     string friend_info;
     int num = redis.scard(user.getUID());
 
-    redisReply **arr = redis.smembers(user.getUID());
+    redisReply *arr = redis.smembers(user.getUID());
 
     // 先过滤有效好友，收集有效的好友信息
     vector<string> validFriendInfos;
     if (arr != nullptr) {
-        for (int i = 0; i < num; i++) {
-            cout << "[DEBUG] 检查好友 " << (i+1) << "/" << num << ", UID: " << arr[i]->str << endl;
-            friend_info = redis.hget("user_info", arr[i]->str);
+        for (size_t i = 0; i < arr->elements; i++) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+            cout << "[DEBUG] 检查好友 " << (i+1) << "/" << arr->elements << ", UID: " << arr->element[i]->str << endl;
+            friend_info = redis.hget("user_info", arr->element[i]->str);
 
             if (friend_info.empty() || friend_info.length() < 10) {
-                cout << "[ERROR] 好友信息无效，跳过 UID: " << arr[i]->str << endl;
+                cout << "[ERROR] 好友信息无效，跳过 UID: " << arr->element[i]->str << endl;
             } else {
                 validFriendInfos.push_back(friend_info);
                 cout << "[DEBUG] 有效好友信息: " << friend_info.substr(0, 50) << "..." << endl;
             }
-            freeReplyObject(arr[i]);
         }
+        freeReplyObject(arr);
     }
 
     // 发送有效好友数量
@@ -146,19 +147,18 @@ void add_friend(int fd, User &user) {
 void findRequest(int fd, User &user) {
     Redis redis;
     redis.connect();
-    //只是一个好友申请缓冲区
     int num = redis.scard(user.getUID() + "add_friend");
-    //发送缓冲区申请数量
     sendMsg(fd, to_string(num));
     if (num == 0) {
         return;
     }
-    redisReply **arr = redis.smembers(user.getUID() + "add_friend");
+    redisReply *arr = redis.smembers(user.getUID() + "add_friend");
     if (arr != nullptr) {
         string user_info;
         User friendRequest;
-        for (int i = 0; i < num; i++) {
-            user_info = redis.hget("user_info", arr[i]->str);
+        for (size_t i = 0; i < arr->elements; i++) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+            user_info = redis.hget("user_info", arr->element[i]->str);
             friendRequest.json_parse(user_info);
 
             sendMsg(fd, friendRequest.getUsername());
@@ -167,37 +167,26 @@ void findRequest(int fd, User &user) {
             recvMsg(fd, reply);
             if (reply == "REFUSE") {
                 sendMsg(fd, user_info);
-                redis.srem(user.getUID() + "add_friend", arr[i]->str);
-                freeReplyObject(arr[i]);
-                continue; 
+                redis.srem(user.getUID() + "add_friend", arr->element[i]->str);
+                continue;
             }else if (reply == "IGNORE") {
-                freeReplyObject(arr[i]);
                 continue;
             }else if (reply == "ACCEPT") {
-                redis.sadd(user.getUID(), arr[i]->str);
-                redis.sadd(arr[i]->str, user.getUID());
-                redis.srem(user.getUID() + "add_friend", arr[i]->str);
-
-                //加上好友之后，我俩的好友申请列表里，都不会再出现对方了！！！
-                redis.srem(string(arr[i]->str) + "add_friend", user.getUID());
-
-                // ========== 新增：设置好友加入时间戳 ==========
-                // 添加好友时，设置当前时间为加入时间
+                redis.sadd(user.getUID(), arr->element[i]->str);
+                redis.sadd(arr->element[i]->str, user.getUID());
+                redis.srem(user.getUID() + "add_friend", arr->element[i]->str);
+                redis.srem(string(arr->element[i]->str) + "add_friend", user.getUID());
                 time_t now = time(nullptr);
-                redis.hset("friend_join_time", user.getUID() + "_" + string(arr[i]->str), to_string(now));
-                redis.hset("friend_join_time", string(arr[i]->str) + "_" + user.getUID(), to_string(now));
-
-                cout << "[DEBUG] 添加好友，设置加入时间戳: " << user.getUID() << " <-> " << arr[i]->str << "，时间: " << now << endl;
-
-                freeReplyObject(arr[i]);
+                redis.hset("friend_join_time", user.getUID() + "_" + string(arr->element[i]->str), to_string(now));
+                redis.hset("friend_join_time", string(arr->element[i]->str) + "_" + user.getUID(), to_string(now));
+                cout << "[DEBUG] 添加好友，设置加入时间戳: " << user.getUID() << " <-> " << arr->element[i]->str << "，时间: " << now << endl;
                 continue;
             }else if (reply == "0") {
-                freeReplyObject(arr[i]);
-                return; 
+                freeReplyObject(arr);
+                return;
             }
-
-           
         }
+        freeReplyObject(arr);
     }
 }
 
@@ -248,15 +237,16 @@ void unblocked(int fd, User &user) {
     if (num == 0) {
         return;
     }
-    redisReply **arr = redis.smembers("blocked" + user.getUID());
+    redisReply *arr = redis.smembers("blocked" + user.getUID());
     if (arr != nullptr) {
         string blocked_info;
-        for (int i = 0; i < num; ++i) {
-            blocked_info = redis.hget("user_info", arr[i]->str);
+        for (size_t i = 0; i < arr->elements; ++i) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+            blocked_info = redis.hget("user_info", arr->element[i]->str);
             //循环发送屏蔽名单信息
             sendMsg(fd, blocked_info);
-            freeReplyObject(arr[i]);
         }
+        freeReplyObject(arr);
     }
     //接收解除屏蔽的信息
     string UID;
@@ -461,90 +451,68 @@ void recvFile_Friend(int epfd, int fd) {
     Message message;
     string path;
     
-    redisReply **arr = redis.smembers("recv" + user.getUID());
+    redisReply *arr = redis.smembers("recv" + user.getUID());
+    if (arr != nullptr) {
+        for (size_t i = 0; i < arr->elements; ++i) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
 
-    cout << "[DEBUG] 接收队列中的原始数据: " << arr[0]->str << endl;
+            cout << "[DEBUG] 接收队列中的原始数据: " << arr->element[i]->str << endl;
 
-    // 检查数据格式
-    try {
-        json test_json = json::parse(arr[0]->str);
-        cout << "[DEBUG] JSON格式验证通过" << endl;
-    } catch (const exception& e) {
-        cout << "[ERROR] 接收队列中的数据不是有效JSON: " << e.what() << endl;
-        cout << "[ERROR] 原始数据: " << arr[0]->str << endl;
-        sendMsg(fd, "INVALID_FILE_DATA");
-        freeReplyObject(arr[0]);
-        return;
-    }
+            // 检查数据格式
+            try {
+                json test_json = json::parse(arr->element[i]->str);
+                cout << "[DEBUG] JSON格式验证通过" << endl;
+            } catch (const exception& e) {
+                cout << "[ERROR] 接收队列中的数据不是有效JSON: " << e.what() << endl;
+                cout << "[ERROR] 原始数据: " << arr->element[i]->str << endl;
+                sendMsg(fd, "INVALID_FILE_DATA");
+                redis.srem("recv" + user.getUID(), arr->element[i]->str);
+                continue;
+            }
 
-    sendMsg(fd, arr[0]->str);
-    message.json_parse(arr[0]->str);
-    path = message.getContent();
-    cout << "[DEBUG] 尝试访问文件路径: " << path << endl;
+            sendMsg(fd, arr->element[i]->str);
+            message.json_parse(arr->element[i]->str);
+            path = message.getContent();
+            cout << "[DEBUG] 尝试访问文件路径: " << path << endl;
 
-    struct stat info;
-    if (stat(path.c_str(), &info) == -1) {
-        cout << "[ERROR] 文件不存在或无法访问: " << path << endl;
-        cout << "[ERROR] 错误原因: " << strerror(errno) << endl;
+            struct stat info;
+            if (stat(path.c_str(), &info) == -1) {
+                cout << "[ERROR] 文件不存在或无法访问: " << path << endl;
+                cout << "[ERROR] 错误原因: " << strerror(errno) << endl;
+                sendMsg(fd, "FILE_NOT_FOUND");
+                redis.srem("recv" + user.getUID(), arr->element[i]->str);
+                continue;
+            }
+            string reply;
 
-        // 尝试检查文件是否存在
-        if (filesystem::exists(path)) {
-            cout << "[DEBUG] 文件存在但无法stat，可能是权限问题" << endl;
-        } else {
-            cout << "[DEBUG] 文件不存在" << endl;
+            sendMsg(fd, "yes");
+
+            cout << "[DEBUG] 等待客户端回复是否接收文件..." << endl;
+            int _ret = recvMsg(fd, reply);
+            cout << "[DEBUG] 收到客户端回复: '" << reply << "', 长度: " << reply.length() << endl;
+
+            if (_ret <= 0) {
+                cout << "[ERROR] 接收客户端回复失败" << endl;
+                redis.hdel("is_online", user.getUID());
+                break;
+            }
+
+            if (reply == "NO") {
+                cout << "[DEBUG] 客户端拒绝接收文件" << endl;
+                redis.srem("recv" + user.getUID(), arr->element[i]->str);
+                continue;
+            }
+
+            cout << "[DEBUG] 客户端同意接收文件，开始传输" << endl;
+
+            int fp = open(path.c_str(), O_RDONLY);
+            sendMsg(fd, to_string(info.st_size));
+            sendfile(fd, fp, nullptr, info.st_size);
+            close(fp);
+            redis.srem("recv" + user.getUID(), arr->element[i]->str);
         }
-
-        // 跳过这个文件
-        sendMsg(fd, "FILE_NOT_FOUND");
-        redis.srem("recv" + user.getUID(), arr[0]->str);
-        freeReplyObject(arr[0]);
-        return;
+        freeReplyObject(arr);
     }
-    string reply;
-
-    sendMsg(fd, "yes");
-
-    cout << "[DEBUG] 等待客户端回复是否接收文件..." << endl;
-    int _ret = recvMsg(fd, reply);
-    cout << "[DEBUG] 收到客户端回复: '" << reply << "', 长度: " << reply.length() << endl;
-
-    if (_ret <= 0) {
-        cout << "[ERROR] 接收客户端回复失败" << endl;
-        redis.hdel("is_online", user.getUID());
-        // redis.srem("recv" + user.getUID(), arr[0]->str);
-        freeReplyObject(arr[0]);
-        return;
-    }
-
-    if (reply == "NO") {
-        cout << "[DEBUG] 客户端拒绝接收文件" << endl;
-        redis.srem("recv" + user.getUID(), arr[0]->str);
-        freeReplyObject(arr[0]);
-        return;
-    }
-
-    cout << "[DEBUG] 客户端同意接收文件，开始传输" << endl;
-
-    int fp = open(path.c_str(), O_RDONLY);
-
-    sendMsg(fd, to_string(info.st_size));
-    off_t ret;
-    off_t sum = info.st_size;
-    off_t size = 0;
-    while (true) {
-        ret = sendfile(fd, fp, nullptr, info.st_size);
-        if (ret == 0) {
-            cout << "文件传输成功" << buf << endl;
-            break;
-        } else if (ret > 0) {
-            //   cout << ret << endl;
-            sum -= ret;
-            size += ret;
-        }
-    }
-    redis.srem("recv" + user.getUID(), arr[0]->str);
-    close(fp);
-    freeReplyObject(arr[0]);
     
 }
 
@@ -651,17 +619,17 @@ void sendFile_Group(int epfd, int fd) {
     redis.lpush(group.getGroupUid() + "history", message.to_json());
     
     // 将文件添加到群聊成员的接收队列
-    redisReply **members = redis.smembers(group.getMembers());
-    int memberCount = redis.scard(group.getMembers());
-
-
-    //注意，添加的是纯路径的消息
-    for (int i = 0; i < memberCount; i++) {
-        string memberUID = string(members[i]->str);
-        if (memberUID != user.getUID()) {  // 不给发送者自己添加
-            redis.sadd("recv" + group.getGroupUid()+memberUID, filemessage.to_json());
+    redisReply *members = redis.smembers(group.getMembers());
+    if (members != nullptr) {
+        //注意，添加的是纯路径的消息
+        for (size_t i = 0; i < members->elements; i++) {
+            if(members->element[i] == nullptr || members->element[i]->str == nullptr) continue;
+            string memberUID = string(members->element[i]->str);
+            if (memberUID != user.getUID()) {  // 不给发送者自己添加
+                redis.sadd("recv" + group.getGroupUid()+memberUID, filemessage.to_json());
+            }
         }
-        freeReplyObject(members[i]);
+        freeReplyObject(members);
     }
 
     
@@ -669,40 +637,40 @@ void sendFile_Group(int epfd, int fd) {
         
 
         message.setUidTo(group.getGroupUid());
-        redisReply **arr = redis.smembers(group.getMembers());
-        string UIDto;
-        for (int i = 0; i < len; i++) {
-            UIDto = string(arr[i]->str);
-            
-            if (UIDto == user.getUID()) {
-                freeReplyObject(arr[i]);
-                continue;
-            }
-            //不在线
-            if (!redis.hexists("is_online", UIDto)) {
-                
-                redis.sadd(UIDto + "file_notify", group.getGroupName());
-                freeReplyObject(arr[i]);
-                continue;
-            }
-            //在线，不在群聊中，发送通知
-            if (!redis.sismember("group_chat", UIDto)) {
-                // 使用统一接收连接发送通知
+        redisReply *arr = redis.smembers(group.getMembers());
+        if (arr != nullptr) {
+            string UIDto;
+            for (size_t i = 0; i < arr->elements; i++) {
+                if(arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+                UIDto = string(arr->element[i]->str);
+
+                if (UIDto == user.getUID()) {
+                    continue;
+                }
+                //不在线
+                if (!redis.hexists("is_online", UIDto)) {
+
+                    redis.sadd(UIDto + "file_notify", group.getGroupName());
+                    continue;
+                }
+                //在线，不在群聊中，发送通知
+                if (!redis.sismember("group_chat", UIDto)) {
+                    // 使用统一接收连接发送通知
+                    if (redis.hexists("unified_receiver", UIDto)) {
+                        string receiver_fd_str = redis.hget("unified_receiver", UIDto);
+                        int receiver_fd = stoi(receiver_fd_str);
+                        sendMsg(receiver_fd, "FILE:" + group.getGroupName());
+                    }
+                    continue;
+                }
+                // 在群聊中，使用统一接收连接发送实时消息
                 if (redis.hexists("unified_receiver", UIDto)) {
                     string receiver_fd_str = redis.hget("unified_receiver", UIDto);
                     int receiver_fd = stoi(receiver_fd_str);
-                    sendMsg(receiver_fd, "FILE:" + group.getGroupName());
+                    sendMsg(receiver_fd, message.to_json());
                 }
-                freeReplyObject(arr[i]);
-                continue;
             }
-            // 在群聊中，使用统一接收连接发送实时消息
-            if (redis.hexists("unified_receiver", UIDto)) {
-                string receiver_fd_str = redis.hget("unified_receiver", UIDto);
-                int receiver_fd = stoi(receiver_fd_str);
-                sendMsg(receiver_fd, message.to_json());
-            }
-            freeReplyObject(arr[i]);
+            freeReplyObject(arr);
         }
 
     cout << "[DEBUG] 群聊文件发送完成: " << fileName << endl;
@@ -713,26 +681,21 @@ void sendFile_Group(int epfd, int fd) {
 
 // 群聊接收文件
 void recvFile_Group(int epfd, int fd) {
-
-    
     cout << "recvFile_Group开始" << endl;
-     string user_info;
+    string user_info;
     recvMsg(fd, user_info);
     User user;
     user.json_parse(user_info);
-    
-    
+
     Redis redis;
     redis.connect();
 
     string G_uid;
     recvMsg(fd,G_uid);
-cout << "G_uid" << G_uid << endl;
-    // 获取用户的群聊文件数量
+    cout << "G_uid" << G_uid << endl;
     int num = redis.scard("recv" + G_uid + user.getUID());
     cout << "[DEBUG] 用户" << user.getUsername() << " 有 " << num << " 个群聊文件待接收" << endl;
 
-    // 发送文件数量
     sendMsg(fd, to_string(num));
     cout << "[DEBUG] 已发送群聊文件数量: " << num << endl;
 
@@ -740,75 +703,63 @@ cout << "G_uid" << G_uid << endl;
         return;
     }
 
-    redisReply **arr = redis.smembers("recv" + G_uid + user.getUID());
-    
-    sendMsg(fd, arr[0]->str);
+    redisReply *arr = redis.smembers("recv" + G_uid + user.getUID());
+    if (arr != nullptr) {
+        for (size_t i = 0; i < arr->elements; ++i) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
 
-    Message message;
-    message.json_parse(arr[0]->str);
-    string path = message.getContent();
+            Message message;
+            string path;
+            try {
+                message.json_parse(arr->element[i]->str);
+                path = message.getContent();
+            } catch (const std::exception& e) {
+                cout << "[ERROR] JSON解析失败: " << e.what() << endl;
+                redis.srem("recv" + G_uid + user.getUID(), arr->element[i]->str);
+                continue;
+            }
 
-    cout << "[DEBUG] 尝试访问群聊文件路径: " << path << endl;
+            sendMsg(fd, arr->element[i]->str);
+            cout << "[DEBUG] 尝试访问群聊文件路径: " << path << endl;
 
-    struct stat info;
-    if (stat(path.c_str(), &info) == -1) {
-        cout << "[ERROR] 群聊文件不存在或无法访问: " << path << endl;
-        cout << "[ERROR] 错误原因: " << strerror(errno) << endl;
+            struct stat info;
+            if (stat(path.c_str(), &info) == -1) {
+                cout << "[ERROR] 群聊文件不存在或无法访问: " << path << endl;
+                redis.srem("recv" + G_uid + user.getUID(), arr->element[i]->str);
+                continue;
+            }
 
-        // 跳过这个文件
-        redis.srem("recv" + G_uid + user.getUID(), arr[0]->str);
-        freeReplyObject(arr[0]);
-        return;
-    }
+            string reply;
+            cout << "[DEBUG] 等待客户端回复是否接收群聊文件..." << endl;
+            int _ret = recvMsg(fd, reply);
+            if (_ret <= 0) {
+                cout << "[ERROR] 接收客户端回复失败" << endl;
+                redis.hdel("is_online", user.getUID());
+                break;
+            }
 
-    string reply;
-    cout << "[DEBUG] 等待客户端回复是否接收群聊文件..." << endl;
-    int _ret = recvMsg(fd, reply);
-    cout << "[DEBUG] 收到客户端回复: '" << reply << "'" << endl;
+            if (reply == "NO") {
+                cout << "[DEBUG] 客户端拒绝接收群聊文件" << endl;
+                redis.srem("recv" + G_uid + user.getUID(), arr->element[i]->str);
+                continue;
+            }
 
-    if (_ret <= 0) {
-        cout << "[ERROR] 接收客户端回复失败" << endl;
-        redis.hdel("is_online", user.getUID());
-        redis.srem("recv" + G_uid + user.getUID(), arr[0]->str);
-        freeReplyObject(arr[0]);
-        return;
-    }
+            cout << "[DEBUG] 客户端同意接收群聊文件，开始传输" << endl;
 
-    if (reply == "NO") {
-        cout << "[DEBUG] 客户端拒绝接收群聊文件" << endl;
-        redis.srem("recv" + G_uid + user.getUID(), arr[0]->str);
-        freeReplyObject(arr[0]);
-        return;
-    }
+            int fp = open(path.c_str(), O_RDONLY);
+            if (fp == -1) {
+                cout << "[ERROR] 无法打开群聊文件: " << path << endl;
+                redis.srem("recv" + G_uid + user.getUID(), arr->element[i]->str);
+                continue;
+            }
 
-    cout << "[DEBUG] 客户端同意接收群聊文件，开始传输" << endl;
-
-    int fp = open(path.c_str(), O_RDONLY);
-    if (fp == -1) {
-        cout << "[ERROR] 无法打开群聊文件: " << path << endl;
-        redis.srem("recv" + G_uid + user.getUID(), arr[0]->str);
-        freeReplyObject(arr[0]);
-        return;
-    }
-
-    sendMsg(fd, to_string(info.st_size));
-    off_t ret;
-    off_t sum = info.st_size;
-
-    while (true) {
-        ret = sendfile(fd, fp, nullptr, info.st_size);
-        if (ret == 0) {
-            cout << "[DEBUG] 群聊文件传输成功" << endl;
-            break;
-        } else if (ret > 0) {
-            sum -= ret;
+            sendMsg(fd, to_string(info.st_size));
+            sendfile(fd, fp, nullptr, info.st_size);
+            close(fp);
+            redis.srem("recv" + G_uid + user.getUID(), arr->element[i]->str);
         }
+        freeReplyObject(arr);
     }
-
-    redis.srem("recv" + G_uid + user.getUID(), arr[0]->str);
-    close(fp);
-    freeReplyObject(arr[0]);
-    
 }
 
 
@@ -821,111 +772,100 @@ void deactivateAccount(int fd, User &user) {
     string UID = user.getUID();
     string created = "created" + user.getUID();
     Group group;
-    redisReply **brr;
     int num = redis.scard(created);
     string UIDto;
-    // 将用户添加到注销集合
+
     redis.sadd("deactivated_users", user.getUID());
 
-    //发送解散群聊通知，解散群
-    if(num != 0 ) {
-        redisReply **arr = redis.smembers(created);
-      
-        for (int i = 0; i < num; i++) {
-            string json = redis.hget("group_info", arr[i]->str);
+    if(num > 0 ) {
+        redisReply *arr = redis.smembers(created);
+        if (arr != nullptr) {
+            for (size_t i = 0; i < arr->elements; i++) {
+                if(arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+                string json_str = redis.hget("group_info", arr->element[i]->str);
+                if (json_str.empty()) continue;
 
-            //具体创建的群聊，得到了群的具体信息消息实时通知
-            group.json_parse(json);
-            string groupName = group.getGroupName();
-            //具体群的群成员
-            brr = redis.smembers(group.getMembers());
-            int len = redis.scard(group.getMembers());
-            for (int j = 0; j < len; j++) {
-                //集合里存的是群聊UID,是UID的主键世界
-                UIDto = brr[j]->str;
-                if (UIDto == user.getUID()) {
-                    continue;
+                group.json_parse(json_str);
+                string groupName = group.getGroupName();
+
+                redisReply* brr = redis.smembers(group.getMembers());
+                if (brr != nullptr) {
+                    for (size_t j = 0; j < brr->elements; j++) {
+                        if(brr->element[j] == nullptr || brr->element[j]->str == nullptr) continue;
+                        UIDto = brr->element[j]->str;
+                        if (UIDto == user.getUID()) continue;
+
+                        if (!redis.hexists("is_online", UIDto)) {
+                            redis.sadd(UIDto + "deleteAC_notify", groupName);
+                        } else {
+                            string receiver_fd_str = redis.hget("unified_receiver", UIDto);
+                            if (!receiver_fd_str.empty()) {
+                                int receiver_fd = stoi(receiver_fd_str);
+                                sendMsg(receiver_fd, "deleteAC_notify:" + groupName);
+                            }
+                        }
+                        redis.srem("joined" + UIDto, group.getGroupUid());
+                        redis.srem("created" + UIDto, group.getGroupUid());
+                        redis.srem("managed" + UIDto, group.getGroupUid());
+                        redis.hdel("user_join_time", group.getGroupUid() + UIDto);
+                    }
+                    freeReplyObject(brr);
                 }
-                //不在线
-                if (!redis.hexists("is_online", UIDto)) {
-                    redis.sadd(UIDto +"deleteAC_notify", group.getGroupName());
-                    continue;
+
+                redis.del(group.getMembers());
+                redis.del(group.getAdmins());
+                redis.del(group.getGroupUid() + "history");
+                redis.srem("group_Name", group.getGroupName());
+                redis.hdel("group_info", group.getGroupUid());
+
+                MySQL mysql_db;
+                if (mysql_db.connect()) {
+                    mysql_db.deleteGroupMessages(group.getGroupUid());
+                    cout << "[DEBUG] 解散群聊，已删除MySQL中的群聊消息: " << group.getGroupUid() << endl;
                 }
-                //发送通知
-                string receiver_fd_str = redis.hget("unified_receiver", UIDto);
-                int receiver_fd = stoi(receiver_fd_str);
-                sendMsg(receiver_fd, "deleteAC_notify:" + group.getGroupName());
-                
             }
+            freeReplyObject(arr);
+        }
+    }
 
-        //关闭客户端线程
-        string receiver_fd_str = redis.hget("unified_receiver", UIDto);
+    string receiver_fd_str = redis.hget("unified_receiver", user.getUID());
+    if (!receiver_fd_str.empty()) {
         int receiver_fd = stoi(receiver_fd_str);
         sendMsg(receiver_fd, "deAC");
         close(receiver_fd);
-            
-            for (int k = 0; k < len; k++) {
-                UIDto = brr[k]->str;//每个群成员的uid
-                redis.srem("joined" + UIDto, group.getGroupUid());
-                redis.srem("created" + UIDto, group.getGroupUid());
-                redis.srem("managed" + UIDto, group.getGroupUid());
-                redis.hdel("user_join_time", group.getGroupUid() + UIDto);
-                freeReplyObject(brr[k]);
-            }
-            
-       
-            //删群的相关业务
-            redis.del(group.getMembers());
-            redis.del(group.getAdmins());
-            redis.del(group.getGroupUid() + "history");
-            redis.srem("group_Name", group.getGroupName());
-            redis.hdel("group_info", group.getGroupUid());
+    }
 
-            //删除MySQL中的群聊消息
-            MySQL mysql;
-            if (mysql.connect()) {
-                mysql.deleteGroupMessages(group.getGroupUid());
-                cout << "[DEBUG] 解散群聊，已删除MySQL中的群聊消息: " << group.getGroupUid() << endl;
-            }
-            freeReplyObject(arr[i]);
+    string user_info_str = redis.hget("user_info", user.getUID());
+    if (!user_info_str.empty()) {
+        try {
+            json root = json::parse(user_info_str);
+            root["email"] = "";
+            redis.hset("user_info", user.getUID(), root.dump());
+            redis.hdel("email_to_uid", user.getEmail());
+        } catch (const json::parse_error& e) {
+            cerr << "JSON parsing error: " << e.what() << endl;
         }
     }
 
-
-     string user_info = redis.hget("user_info", user.getUID());
-
-     json root = json::parse(user_info);
-            
-                root["email"] = "";  
-                redis.hset("user_info", user.getUID(), root.dump());
-                redis.hdel("email_to_uid", user.getEmail());
-
-
-    
-    // 删除用户的所有私聊历史记录
     MySQL mysql;
     if (mysql.connect()) {
-        // 获取用户的所有好友
-        redisReply **friends_arr = redis.smembers(user.getUID());
-        int friends_count = redis.scard(user.getUID());
-
-        for (int i = 0; i < friends_count; i++) {
-            string friend_uid = friends_arr[i]->str;
-            // 删除与每个好友的私聊记录
-            mysql.deleteMessagesCompletely(user.getUID(), friend_uid);
-            cout << "[DEBUG] 已删除用户 " << user.getUID() << " 与 " << friend_uid << " 的私聊记录" << endl;
-            freeReplyObject(friends_arr[i]);
+        redisReply *friends_arr = redis.smembers(user.getUID());
+        if (friends_arr != nullptr) {
+            for (size_t i = 0; i < friends_arr->elements; i++) {
+                if(friends_arr->element[i] == nullptr || friends_arr->element[i]->str == nullptr) continue;
+                string friend_uid = friends_arr->element[i]->str;
+                mysql.deleteMessagesCompletely(user.getUID(), friend_uid);
+                cout << "[DEBUG] 已删除用户 " << user.getUID() << " 与 " << friend_uid << " 的私聊记录" << endl;
+            }
+            freeReplyObject(friends_arr);
         }
-        free(friends_arr);
     }
 
-    // 从在线状态中移除
     redis.hdel("is_online", user.getUID());
     redis.hdel("unified_receiver", user.getUID());
     redis.srem("is_chat", user.getUID());
 
     cout << "[DEBUG] 用户 " << user.getUsername() << " 已注销，所有相关数据已清理" << endl;
-
 }
 
 // MySQL聊天

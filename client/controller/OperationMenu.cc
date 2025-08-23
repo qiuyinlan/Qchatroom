@@ -145,7 +145,7 @@ void clientOperation(int fd, User &user) {
         } else if (opt == 8) {
             vector<Group> joinedGroup;
             friendManager.listFriends(my_friends, joinedGroup);
-            gChat.syncGL(joinedGroup);
+            // gChat.syncGL(joinedGroup); // This call is redundant as listFriends already syncs groups, causing a crash.
             chatSession.history(my_friends, joinedGroup);
         } else if (opt == 9) {
             if (deactivateAccount(fd, user)) {

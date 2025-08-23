@@ -93,19 +93,20 @@ void GroupChat::synchronizeGL(int fd, User &user) {
    
     //发送群info
     if (num != 0) {
-        redisReply **arr = redis.smembers(joined);
+        redisReply *arr = redis.smembers(joined);
         if (arr != nullptr) {
-            for (int i = 0; i < num; i++) {
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
                 // 先检查群是否存在
-                if (!redis.hexists("group_info", arr[i]->str)) {
-                    redis.srem(joined, arr[i]->str);
+                if (!redis.hexists("group_info", arr->element[i]->str)) {
+                    redis.srem(joined, arr->element[i]->str);
                     continue;
                 }
 
-                group_info = redis.hget("group_info", arr[i]->str);
+                group_info = redis.hget("group_info", arr->element[i]->str);
                 sendMsg(fd, group_info);
-                freeReplyObject(arr[i]);
             }
+            freeReplyObject(arr);
         }
     }
    cout << "synchronizeGL同步群聊列表结束" << endl;
@@ -126,54 +127,43 @@ void GroupChat::sync() {
     }
    
     
-    if(num != 0 ) {
-       
-        redisReply **arr = redis.smembers(created);
-      
-        for (int i = 0; i < num; i++) {
-            string json = redis.hget("group_info", arr[i]->str);
-            //std::cout << "[DEBUG] 发送创建的群信息: " << json << std::endl;
-            int ret = sendMsg(fd, json);
-            if (ret <= 0) {
-              //  std::cerr << "[ERROR] 同步创建的群信息sendMsg() 失败" << std::endl;
-                return;
+    if(num > 0 ) {
+        redisReply *arr = redis.smembers(created);
+        if (arr != nullptr) {
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+                string json = redis.hget("group_info", arr->element[i]->str);
+                if (sendMsg(fd, json) <= 0) return;
             }
-            freeReplyObject(arr[i]);
+            freeReplyObject(arr);
         }
     }
     num = redis.scard(managed);
     std::cout << "[DEBUG] 管理的群数量: " << num << std::endl;
-    // 发送管理的群数量
     sendMsg(fd, to_string(num));
-    if (num != 0) {
-        redisReply **arr = redis.smembers(managed);
-        for (int i = 0; i < num; i++) {
-            string json = redis.hget("group_info", arr[i]->str);
-            std::cout << "[DEBUG] 发送管理的群信息: " << json << std::endl;
-            sendMsg(fd, json);
-            freeReplyObject(arr[i]);
+    if (num > 0) {
+        redisReply *arr = redis.smembers(managed);
+        if (arr != nullptr) {
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+                string json = redis.hget("group_info", arr->element[i]->str);
+                sendMsg(fd, json);
+            }
+            freeReplyObject(arr);
         }
     }
     num = redis.scard(joined);
     std::cout << "[DEBUG] 加入的群数量: " << num << std::endl;
-    // 发送加入的群数量
     sendMsg(fd, to_string(num));
-    if (num != 0) {
-        redisReply **arr = redis.smembers(joined);
-        for (int i = 0; i < num; i++) {
-            string groupId = arr[i]->str;
-            string json = redis.hget("group_info", groupId);
-
-            // 在发送前验证JSON格式
-            try {
-                nlohmann::json testParse = nlohmann::json::parse(json);
-            } catch (const std::exception& e) {
-                std::cout << "[ERROR] JSON解析测试失败: " << e.what() << std::endl;
-                std::cout << "[ERROR] 问题JSON: " << json << std::endl;
+    if (num > 0) {
+        redisReply *arr = redis.smembers(joined);
+        if (arr != nullptr) {
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+                string json = redis.hget("group_info", arr->element[i]->str);
+                sendMsg(fd, json);
             }
-
-            sendMsg(fd, json);
-            freeReplyObject(arr[i]);
+            freeReplyObject(arr);
         }
     }
     std::cout << "[DEBUG] GroupChat::sync() 完成" << std::endl;
@@ -185,7 +175,7 @@ void GroupChat::startChat() {
     redis.connect();
     redis.sadd("group_chat", user.getUID());
     string group_info;
-    redisReply **arr;
+    redisReply *arr;
     int ret;
     recvMsg(fd, group_info);
     
@@ -291,39 +281,33 @@ void GroupChat::startChat() {
         }
         message.setUidTo(group.getGroupUid());
         arr = redis.smembers(group.getMembers());
-        string UIDto;
-
-        //消息实时通知
-        for (int i = 0; i < len; i++) {
-            UIDto = arr[i]->str;
-            if (UIDto == user.getUID()) {
-                freeReplyObject(arr[i]);
-                continue;
-            }
-            //不在线
-            if (!redis.hexists("is_online", UIDto)) {
-                redis.lpush("off_msg" + UIDto, group.getGroupName());
-                freeReplyObject(arr[i]);
-                continue;
-            }
-            //不在群聊中，发送通知
-            if (!redis.sismember("group_chat", UIDto)) {
-                // 使用统一接收连接发送通知
+        if (arr != nullptr) {
+            string UIDto;
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+                UIDto = arr->element[i]->str;
+                if (UIDto == user.getUID()) {
+                    continue;
+                }
+                if (!redis.hexists("is_online", UIDto)) {
+                    redis.lpush("off_msg" + UIDto, group.getGroupName());
+                    continue;
+                }
+                if (!redis.sismember("group_chat", UIDto)) {
+                    if (redis.hexists("unified_receiver", UIDto)) {
+                        string receiver_fd_str = redis.hget("unified_receiver", UIDto);
+                        int receiver_fd = stoi(receiver_fd_str);
+                        sendMsg(receiver_fd, "MESSAGE:" + group.getGroupName());
+                    }
+                    continue;
+                }
                 if (redis.hexists("unified_receiver", UIDto)) {
                     string receiver_fd_str = redis.hget("unified_receiver", UIDto);
                     int receiver_fd = stoi(receiver_fd_str);
-                    sendMsg(receiver_fd, "MESSAGE:" + group.getGroupName());
+                    sendMsg(receiver_fd, msg);
                 }
-                freeReplyObject(arr[i]);
-                continue;
             }
-            // 在群聊中，使用统一接收连接发送实时消息
-            if (redis.hexists("unified_receiver", UIDto)) {
-                string receiver_fd_str = redis.hget("unified_receiver", UIDto);
-                int receiver_fd = stoi(receiver_fd_str);
-                sendMsg(receiver_fd, msg);
-            }
-            freeReplyObject(arr[i]);
+            freeReplyObject(arr);
         }
         
     }
@@ -434,27 +418,22 @@ cout << "收到客户端发送的群聊名称" << groupName << endl;
     sendMsg(fd, "1");
     redis.sadd("if_add" + groupUid, user.getUID());
     //群聊实时通知
-    int num = redis.scard(group.getAdmins());
-    redisReply **arr = redis.smembers(group.getAdmins());
-     if (arr != nullptr) {
-        for (int i = 0; i < num; i++) {
-            string adminUID = arr[i]->str;//遍历每个管理
-         
+    redisReply *arr = redis.smembers(group.getAdmins());
+    if (arr != nullptr) {
+        for (size_t i = 0; i < arr->elements; i++) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+            string adminUID = arr->element[i]->str;
             redis.hset("group_request_info", adminUID, group.getGroupName());
-
-            // 管理员在线
             if (redis.hexists("unified_receiver", adminUID)) {
                 string receiver_fd_str = redis.hget("unified_receiver", adminUID);
                 int receiver_fd = stoi(receiver_fd_str);
                 sendMsg(receiver_fd, "GROUP_REQUEST:" + group.getGroupName());
                 cout << "[DEBUG] 已推送群聊申请通知给在线管理员: " << adminUID << "，群聊: " << group.getGroupName() << endl;
+            } else {
+                redis.sadd(adminUID + "add_group", groupUid);
             }
-            else{
-                  redis.sadd(adminUID+"add_group", groupUid);
-            }
-
-            freeReplyObject(arr[i]);
-         }
+        }
+        freeReplyObject(arr);
     }
 }
 
@@ -513,43 +492,34 @@ void GroupChat::approve(Group &group) const {
 
     sendMsg(fd, to_string(num));
     if (num == 0) {
-    cout << "暂无入群申请" << endl;
+        cout << "暂无入群申请" << endl;
         return;
     }
-    redisReply **arr = redis.smembers("if_add" + group.getGroupUid());
-    string info;
-    string choice;
-    User member;
-    for (int i = 0; i < num; i++) {
-        info = redis.hget("user_info", arr[i]->str);
-        member.json_parse(info);
-
-        sendMsg(fd, member.getUsername());
-
-        int ret = recvMsg(fd, choice);
-        
-        if (ret == 0) {
-            redis.hdel("is_online", user.getUID());
+    redisReply *arr = redis.smembers("if_add" + group.getGroupUid());
+    if (arr != nullptr) {
+        string info;
+        string choice;
+        User member;
+        for (size_t i = 0; i < arr->elements; i++) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+            info = redis.hget("user_info", arr->element[i]->str);
+            member.json_parse(info);
+            sendMsg(fd, member.getUsername());
+            int ret = recvMsg(fd, choice);
+            if (ret == 0) {
+                redis.hdel("is_online", user.getUID());
+                break;
+            }
+            if (choice == "n") {
+                redis.srem("if_add" + group.getGroupUid(), member.getUID());
+            } else {
+                redis.hset("user_join_time", group.getGroupUid()+member.getUID(), member.get_time());
+                redis.sadd("joined" + member.getUID(), group.getGroupUid());
+                redis.sadd(group.getMembers(), member.getUID());
+                redis.srem("if_add" + group.getGroupUid(), member.getUID());
+            }
         }
-        if (choice == "n") {
-            //删除缓冲区
-            redis.srem("if_add" + group.getGroupUid(), member.getUID());
-        } else {
-            redis.hset("user_join_time", group.getGroupUid()+member.getUID(), member.get_time());
-            redis.sadd("joined" + member.getUID(), group.getGroupUid());
-            redis.sadd(group.getMembers(), member.getUID());
-            redis.srem("if_add" + group.getGroupUid(), member.getUID());
-            // //先不通知了。对方在线
-            // if (redis.hexists("unified_receiver", member.getUID())) {
-            //     string receiver_fd_str = redis.hget("unified_receiver", member.getUID());
-            //     int receiver_fd = stoi(receiver_fd_str);
-                
-                
-            // }
-            // redis.sadd("approve_notify" + member.getUID(), group.getGroupUid());
-            // sendMsg()
-        }
-        freeReplyObject(arr[i]);
+        freeReplyObject(arr);
     }
 }
 
@@ -557,17 +527,18 @@ void GroupChat::remove(Group &group) const {//踢人
     Redis redis;
     redis.connect();
     int num = redis.scard(group.getMembers());
-    //发送群员数量
     sendMsg(fd, to_string(num));
-    redisReply **arr = redis.smembers(group.getMembers());
+    redisReply *arr = redis.smembers(group.getMembers());
     User member;
-    string member_info;
-    for (int i = 0; i < num; i++) {
-        member_info = redis.hget("user_info", arr[i]->str);
-        //发送群员信息
-        std::cout << "[SERVER DEBUG] sendMsg to client: " << member_info << std::endl;
-        sendMsg(fd, member_info);
-        freeReplyObject(arr[i]);
+    if (arr != nullptr) {
+        string member_info;
+        for (size_t i = 0; i < arr->elements; i++) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+            member_info = redis.hget("user_info", arr->element[i]->str);
+            std::cout << "[SERVER DEBUG] sendMsg to client: " << member_info << std::endl;
+            sendMsg(fd, member_info);
+        }
+        freeReplyObject(arr);
     }
 
 
@@ -607,15 +578,16 @@ void GroupChat::appointAdmin(Group &group) const {
     Redis redis;
     redis.connect();
     int num = redis.scard(group.getMembers());
-
     sendMsg(fd, to_string(num));
     string member_info;
-    redisReply **arr = redis.smembers(group.getMembers());
-    for (int i = 0; i < num; i++) {
-        member_info = redis.hget("user_info", arr[i]->str);
-
-        sendMsg(fd, member_info);
-        freeReplyObject(arr[i]);
+    redisReply *arr = redis.smembers(group.getMembers());
+    if (arr != nullptr) {
+        for (size_t i = 0; i < arr->elements; i++) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+            member_info = redis.hget("user_info", arr->element[i]->str);
+            sendMsg(fd, member_info);
+        }
+        freeReplyObject(arr);
     }
     string member_choose;
 
@@ -642,20 +614,21 @@ void GroupChat::revokeAdmin(Group &group) const {
     redis.connect();
     int ret;
     int num = redis.scard(group.getAdmins());
-
     sendMsg(fd, to_string(num));
-    redisReply **arr = redis.smembers(group.getAdmins());
+    redisReply *arr = redis.smembers(group.getAdmins());
     string admin_info;
-    for (int i = 0; i < num; i++) {
-        admin_info = redis.hget("user_info", arr[i]->str);
-
-        sendMsg(fd, admin_info);
-        freeReplyObject(arr[i]);
+    if (arr != nullptr) {
+        for (size_t i = 0; i < arr->elements; i++) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+            admin_info = redis.hget("user_info", arr->element[i]->str);
+            sendMsg(fd, admin_info);
+        }
+        freeReplyObject(arr);
     }
     User admin;
 
     recvMsg(fd, admin_info);
-    
+
     admin.json_parse(admin_info);
     redis.srem(group.getAdmins(), admin.getUID());
     redis.srem("managed" + admin.getUID(), group.getGroupUid());
@@ -666,42 +639,35 @@ void GroupChat::revokeAdmin(Group &group) const {
 void GroupChat::deleteGroup(Group &group) {
     Redis redis;
     redis.connect();
-    int num = redis.scard(group.getMembers());
-    redisReply **arr = redis.smembers(group.getMembers());
-    string UID;
-
-     //通知,bug一定要先通知再解散！！！不然群成员数量已经是0了！！！！！
-     int len = redis.scard(group.getMembers());
-     arr = redis.smembers(group.getMembers());
-     string UIDto;
-    //消息实时通知
-    for (int i = 0; i < len; i++) {
-        
-        UIDto = string(arr[i]->str);
-        if (UIDto == group.getOwnerUid()) {
-            continue;
+    redisReply *arr = redis.smembers(group.getMembers());
+    if (arr != nullptr) {
+        string UIDto;
+        for (size_t i = 0; i < arr->elements; i++) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+            UIDto = arr->element[i]->str;
+            if (UIDto == group.getOwnerUid()) {
+                continue;
+            }
+            if (!redis.hexists("is_online", UIDto)) {
+                redis.lpush("DELETE" + UIDto, group.getGroupName());
+                continue;
+            }
+            string receiver_fd_str = redis.hget("unified_receiver", UIDto);
+            if (!receiver_fd_str.empty()) {
+                int receiver_fd = stoi(receiver_fd_str);
+                sendMsg(receiver_fd, "DELETE:" + group.getGroupName());
+            }
         }
-        //不在线
-        if (!redis.hexists("is_online", UIDto)) {
-            redis.lpush("DELETE" + UIDto, group.getGroupName());
-            continue;
+
+        for (size_t i = 0; i < arr->elements; i++) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+            string UID = arr->element[i]->str;
+            redis.srem("joined" + UID, group.getGroupUid());
+            redis.srem("created" + UID, group.getGroupUid());
+            redis.srem("managed" + UID, group.getGroupUid());
+            redis.hdel("user_join_time", group.getGroupUid() + UID);
         }
-        //发送通知
-       
-        string receiver_fd_str = redis.hget("unified_receiver", UIDto);
-        int receiver_fd = stoi(receiver_fd_str);
-        sendMsg(receiver_fd, "DELETE:" + group.getGroupName());
-    
-    }
-
-
-    for (int i = 0; i < len; i++) {
-        UID = arr[i]->str;
-        redis.srem("joined" + UID, group.getGroupUid());
-        redis.srem("created" + UID, group.getGroupUid());
-        redis.srem("managed" + UID, group.getGroupUid());
-        redis.hdel("user_join_time", group.getGroupUid() + UID);
-        freeReplyObject(arr[i]);
+        freeReplyObject(arr);
     }
     redis.del(group.getMembers());
     redis.del(group.getAdmins());
@@ -733,15 +699,17 @@ void GroupChat::showMembers() const {
     int num = redis.scard(group.getMembers());
 
     sendMsg(fd, to_string(num));
-    redisReply **arr = redis.smembers(group.getMembers());
-    User member;
-    string member_info;
-    for (int i = 0; i < num; i++) {
-        member_info = redis.hget("user_info", arr[i]->str);
-        member.json_parse(member_info);
-
-        sendMsg(fd, member.getUsername());
-        freeReplyObject(arr[i]);
+    redisReply *arr = redis.smembers(group.getMembers());
+    if (arr != nullptr) {
+        User member;
+        string member_info;
+        for (size_t i = 0; i < arr->elements; i++) {
+            if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+            member_info = redis.hget("user_info", arr->element[i]->str);
+            member.json_parse(member_info);
+            sendMsg(fd, member.getUsername());
+        }
+        freeReplyObject(arr);
     }
 }
 

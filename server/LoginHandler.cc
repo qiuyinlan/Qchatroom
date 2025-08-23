@@ -278,14 +278,15 @@ void notify(int fd, const string &UID) {//离线通知
     // 好友申请ok
     int num = redis.scard(UID +"add_f_notify");
      if (num != 0) {
-        redisReply **arr = redis.smembers(UID +"add_f_notify");
+        redisReply *arr = redis.smembers(UID +"add_f_notify");
         if (arr != nullptr) {
-            for (int i = 0; i < num; i++) {
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
                 sendMsg(fd, REQUEST_NOTIFICATION);
                 msgnum=true;
-                redis.srem(UID +"add_f_notify", arr[i]->str);
-                freeReplyObject(arr[i]);
+                redis.srem(UID +"add_f_notify", arr->element[i]->str);
             }
+            freeReplyObject(arr);
         }
     }
     
@@ -294,14 +295,15 @@ void notify(int fd, const string &UID) {//离线通知
      num = redis.scard(UID+"add_group");
      if (num != 0) {
          string groupName = redis.hget("group_request_info", UID);
-        redisReply **arr = redis.smembers(UID +"add_group");
+        redisReply *arr = redis.smembers(UID +"add_group");
         if (arr != nullptr) {
-            for (int i = 0; i < num; i++) {
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
                 sendMsg(fd, "GROUP_REQUEST:" + groupName);
                 msgnum=true;
-                redis.srem(UID +"add_group", arr[i]->str);
-                freeReplyObject(arr[i]);
+                redis.srem(UID +"add_group", arr->element[i]->str);
             }
+            freeReplyObject(arr);
         }
         redis.hdel("group_request_info", UID);  
     }
@@ -310,17 +312,18 @@ void notify(int fd, const string &UID) {//离线通知
     //注销后群聊解散通知
      num = redis.scard(UID +"deleteAC_notify");
      if (num != 0) {
-        redisReply **arr = redis.smembers(UID +"deleteAC_notify");
+        redisReply *arr = redis.smembers(UID +"deleteAC_notify");
         if (arr != nullptr) {
-            for (int i = 0; i < num; i++) {
-                string groupName = arr[i]->str;
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+                string groupName = arr->element[i]->str;
                 sendMsg(fd, "deleteAC_notify:" + groupName);
                 msgnum=true;
-                redis.srem(UID +"deleteAC_notify", arr[i]->str);
-                freeReplyObject(arr[i]);
+                redis.srem(UID +"deleteAC_notify", arr->element[i]->str);
             }
+            freeReplyObject(arr);
         }
-        //redis.hdel("group_request_info", UID);  
+        //redis.hdel("group_request_info", UID);
     }
 
     // //入群通知，先不搞了，被踢告知一下就行
@@ -346,56 +349,60 @@ void notify(int fd, const string &UID) {//离线通知
     //被设置为管理员
      num = redis.scard("appoint_admin" + UID);
     if (num != 0) {
-        redisReply **arr = redis.smembers("appoint_admin" + UID);
+        redisReply *arr = redis.smembers("appoint_admin" + UID);
         if (arr != nullptr) {
-            for (int i = 0; i < num; i++) {
-                sendMsg(fd, "ADMIN_ADD:" + string(arr[i]->str));
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+                sendMsg(fd, "ADMIN_ADD:" + string(arr->element[i]->str));
                 msgnum=true;
-                redis.srem("appoint_admin" + UID, arr[i]->str);
-                freeReplyObject(arr[i]);
+                redis.srem("appoint_admin" + UID, arr->element[i]->str);
             }
+            freeReplyObject(arr);
         }
     }
     //被踢出群聊,都带引号吧
     num = redis.scard("REMOVE" + UID);
     if (num != 0) {
-        redisReply **arr = redis.smembers("REMOVE" + UID);
+        redisReply *arr = redis.smembers("REMOVE" + UID);
         if (arr != nullptr) {
-            for (int i = 0; i < num; i++) {
-                sendMsg(fd, "REMOVE:" + string(arr[i]->str));
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+                sendMsg(fd, "REMOVE:" + string(arr->element[i]->str));
                 msgnum=true;
-                redis.srem("REMOVE" + UID , arr[i]->str);
-                freeReplyObject(arr[i]);
+                redis.srem("REMOVE" + UID , arr->element[i]->str);
             }
+            freeReplyObject(arr);
         }
     }
 
     //被移出群聊
     num = redis.scard("DELETE" + UID);
     if (num != 0) {
-        redisReply **arr = redis.smembers("DELETE" + UID);
+        redisReply *arr = redis.smembers("DELETE" + UID);
         if (arr != nullptr) {
-            for (int i = 0; i < num; i++) {
-                sendMsg(fd, "DELETE:" + string(arr[i]->str));
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+                sendMsg(fd, "DELETE:" + string(arr->element[i]->str));
                 msgnum=true;
-                redis.srem("DELETE" + UID , arr[i]->str);
-                freeReplyObject(arr[i]);
+                redis.srem("DELETE" + UID , arr->element[i]->str);
             }
+            freeReplyObject(arr);
         }
     }
  
     // 检查离线文件通知,arr[i]->str 是一个 char* 指针  ok
      num = redis.scard(UID+"file_notify");//里面是要存名字！！！
      if (num != 0) {
-        redisReply **arr = redis.smembers(UID +"file_notify");
+        redisReply *arr = redis.smembers(UID +"file_notify");
         if (arr != nullptr) {
-            for (int i = 0; i < num; i++) {
-                sendMsg(fd, "FILE:" + string(arr[i]->str) );
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+                sendMsg(fd, "FILE:" + string(arr->element[i]->str) );
                 msgnum=true;
-                redis.srem(UID+"file_notify",arr[i]->str); 
-                freeReplyObject(arr[i]);
+                redis.srem(UID+"file_notify",arr->element[i]->str);
             }
-        } 
+            freeReplyObject(arr);
+        }
     }
 
 
@@ -434,14 +441,15 @@ void notify(int fd, const string &UID) {//离线通知
     //被取消管理员权限
     num = redis.scard("revoke_admin" + UID);
     if (num != 0) {
-        redisReply **arr = redis.smembers("revoke_admin" + UID);
+        redisReply *arr = redis.smembers("revoke_admin" + UID);
         if (arr != nullptr) {
-            for (int i = 0; i < num; i++) {
-                sendMsg(fd, "ADMIN_REMOVE:" + string(arr[i]->str));
+            for (size_t i = 0; i < arr->elements; i++) {
+                if (arr->element[i] == nullptr || arr->element[i]->str == nullptr) continue;
+                sendMsg(fd, "ADMIN_REMOVE:" + string(arr->element[i]->str));
                 msgnum=true;
-                redis.srem("revoke_admin" + UID, arr[i]->str);
-                freeReplyObject(arr[i]);
+                redis.srem("revoke_admin" + UID, arr->element[i]->str);
             }
+            freeReplyObject(arr);
         }
     }
 

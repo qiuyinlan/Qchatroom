@@ -58,14 +58,19 @@ int Redis::scard(const string &key) {
     return integer;
 }
 
-redisReply **Redis::smembers(const string &key) {
+redisReply *Redis::smembers(const string &key) {
     string command = "SMEMBERS " + key;
     reply = static_cast<redisReply *>(redisCommand(context, command.c_str()));
-    if (reply == nullptr || reply->type != REDIS_REPLY_ARRAY) {
-        cout << "[REDIS ERROR] SMEMBERS command failed or returned wrong type" << endl;
+    if (reply == nullptr) {
+        cout << "[REDIS ERROR] SMEMBERS command failed (nullptr reply)" << endl;
         return nullptr;
     }
-    return reply->element;
+    if (reply->type != REDIS_REPLY_ARRAY) {
+        cout << "[REDIS ERROR] SMEMBERS command returned wrong type: " << reply->type << endl;
+        freeReplyObject(reply);
+        return nullptr;
+    }
+    return reply;
 }
 
 void Redis::srem(const string &key, const string &value) {

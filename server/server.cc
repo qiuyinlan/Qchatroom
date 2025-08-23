@@ -789,11 +789,12 @@ void handleGetChatLists(int epfd, int fd, const nlohmann::json& msg) {
     response["data"]["groups"] = nlohmann::json::array();
 
 
-    redisReply **friend_replies = redis.smembers(uid);
+    redisReply *friend_replies = redis.smembers(uid);
     if (friend_replies) {
         cout << "[DEBUG] Found friends for UID: " << uid << endl;
-        for (int i = 0; friend_replies[i] != nullptr; ++i) {
-            string friend_id = friend_replies[i]->str;
+        for (size_t i = 0; i < friend_replies->elements; ++i) {
+            if (friend_replies->element[i] == nullptr || friend_replies->element[i]->str == nullptr) continue;
+            string friend_id = friend_replies->element[i]->str;
             cout << "  [DEBUG] Processing friend ID: " << friend_id << endl;
             string user_info_str = redis.hget("user_info", friend_id);
             cout << "    [DEBUG] Fetched user_info: " << user_info_str << endl;
@@ -810,23 +811,24 @@ void handleGetChatLists(int epfd, int fd, const nlohmann::json& msg) {
                 cout << "      [DEBUG] User info is EMPTY. Skipping." << endl;
             }
         }
-
+        freeReplyObject(friend_replies);
     } else {
         cout << "[DEBUG] No friends found for UID: " << uid << " in Redis set." << endl;
     }
 
 
     string group_list_key = "user_groups:" + uid;
-    redisReply **group_reply = redis.smembers(group_list_key);
+    redisReply *group_reply = redis.smembers(group_list_key);
     if (group_reply) {
-        for (int i = 0; group_reply[i] != nullptr; ++i) {
-            string group_id = group_reply[i]->str;
+        for (size_t i = 0; i < group_reply->elements; ++i) {
+            if (group_reply->element[i] == nullptr || group_reply->element[i]->str == nullptr) continue;
+            string group_id = group_reply->element[i]->str;
             string group_info_str = redis.hget("group_info", group_id);
             if (!group_info_str.empty()) {
                 response["data"]["groups"].push_back(nlohmann::json::parse(group_info_str));
             }
         }
-        // Memory leak note applies here as well.
+        freeReplyObject(group_reply);
     }
 
     sendMsg(epfd, fd, response.dump());
@@ -965,10 +967,11 @@ void handleGroupMessage(int epfd, int fd, const nlohmann::json& msg) {
     // 2. Forward to all online group members
     Redis redis;
     if (redis.connect()) {
-        redisReply **replies = redis.smembers("group_members:" + group_uid);
+        redisReply *replies = redis.smembers("group_members:" + group_uid);
         if (replies) {
-            for (int i = 0; replies[i] != nullptr; ++i) {
-                string member_uid = replies[i]->str;
+            for (size_t i = 0; i < replies->elements; ++i) {
+                if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
+                string member_uid = replies->element[i]->str;
                 if (member_uid != sender_uid && redis.hexists("is_online", member_uid)) {
                     int member_fd = stoi(redis.hget("is_online", member_uid));
                     nlohmann::json forward_msg;
@@ -981,7 +984,7 @@ void handleGroupMessage(int epfd, int fd, const nlohmann::json& msg) {
                     sendMsg(epfd, member_fd, forward_msg.dump());
                 }
             }
-            // freeReplyObject(replies); // This is incorrect and causes crashes
+            freeReplyObject(replies);
         }
     }
 }
@@ -1094,12 +1097,13 @@ void handleGetFriendRequests(int epfd, int fd, const nlohmann::json& msg) {
     }
 
     string request_key = my_uid + "add_friend";
-    redisReply **replies = redis.smembers(request_key);
+    redisReply *replies = redis.smembers(request_key);
 
     nlohmann::json requesters = nlohmann::json::array();
     if (replies) {
-        for (int i = 0; replies[i] != nullptr; ++i) {
-            string requester_uid = replies[i]->str;
+        for (size_t i = 0; i < replies->elements; ++i) {
+            if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
+            string requester_uid = replies->element[i]->str;
             string user_info_str = redis.hget("user_info", requester_uid);
             if (!user_info_str.empty()) {
                 try {
@@ -1275,12 +1279,13 @@ void handleGetBlockedListRequest(int epfd, int fd, const nlohmann::json& msg) {
     }
 
     string block_key = "blocked" + my_uid;
-    redisReply **replies = redis.smembers(block_key);
+    redisReply *replies = redis.smembers(block_key);
 
     nlohmann::json blocked_users = nlohmann::json::array();
     if (replies) {
-        for (int i = 0; replies[i] != nullptr; ++i) {
-            string blocked_uid = replies[i]->str;
+        for (size_t i = 0; i < replies->elements; ++i) {
+            if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
+            string blocked_uid = replies->element[i]->str;
             string user_info_str = redis.hget("user_info", blocked_uid);
             if (!user_info_str.empty()) {
                 try {
@@ -1362,10 +1367,11 @@ void handleDeactivateAccountRequest(int epfd, int fd, const nlohmann::json& msg)
 
     // 2. 解散该用户创建的所有群聊
     string created_groups_key = "created" + my_uid;
-    redisReply **created_groups_reply = redis.smembers(created_groups_key);
+    redisReply *created_groups_reply = redis.smembers(created_groups_key);
     if (created_groups_reply) {
-        for (int i = 0; created_groups_reply[i] != nullptr; ++i) {
-            string group_uid = created_groups_reply[i]->str;
+        for (size_t i = 0; i < created_groups_reply->elements; ++i) {
+            if (created_groups_reply->element[i] == nullptr || created_groups_reply->element[i]->str == nullptr) continue;
+            string group_uid = created_groups_reply->element[i]->str;
             string group_info_str = redis.hget("group_info", group_uid);
             if (group_info_str.empty()) continue;
 
@@ -1374,10 +1380,11 @@ void handleDeactivateAccountRequest(int epfd, int fd, const nlohmann::json& msg)
 
             // 通知所有群成员
             string members_key = group.getMembers();
-            redisReply **members_reply = redis.smembers(members_key);
+            redisReply *members_reply = redis.smembers(members_key);
             if (members_reply) {
-                for (int j = 0; members_reply[j] != nullptr; ++j) {
-                    string member_uid = members_reply[j]->str;
+                for (size_t j = 0; j < members_reply->elements; ++j) {
+                    if (members_reply->element[j] == nullptr || members_reply->element[j]->str == nullptr) continue;
+                    string member_uid = members_reply->element[j]->str;
                     if (member_uid == my_uid) continue;
                     // TODO: 此处应发送一个JSON格式的解散通知
                     if (redis.hexists("unified_receiver", member_uid)) {
@@ -1409,10 +1416,11 @@ void handleDeactivateAccountRequest(int epfd, int fd, const nlohmann::json& msg)
     redis.hdel("user_info", my_uid);
 
     // 4. 删除所有私聊记录
-    redisReply **friends_reply = redis.smembers(my_uid);
+    redisReply *friends_reply = redis.smembers(my_uid);
     if (friends_reply) {
-        for (int i = 0; friends_reply[i] != nullptr; ++i) {
-            string friend_uid = friends_reply[i]->str;
+        for (size_t i = 0; i < friends_reply->elements; ++i) {
+            if (friends_reply->element[i] == nullptr || friends_reply->element[i]->str == nullptr) continue;
+            string friend_uid = friends_reply->element[i]->str;
             g_mysql.deleteMessagesCompletely(my_uid, friend_uid);
             redis.srem(friend_uid, my_uid); // 从对方好友列表中移除自己
         }
@@ -1804,10 +1812,11 @@ void handleFileData(int epfd, int fd, const char* data, int len) {
             g_mysql.insertGroupMessage(state.group_uid, state.sender_uid, fileMessage.getContent());
 
             // Add to each member's pending queue
-            redisReply **replies = redis.smembers("group_members:" + state.group_uid);
+            redisReply *replies = redis.smembers("group_members:" + state.group_uid);
             if (replies) {
-                for (int i = 0; replies[i] != nullptr; ++i) {
-                    string member_uid = replies[i]->str;
+                for (size_t i = 0; i < replies->elements; ++i) {
+                    if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
+                    string member_uid = replies->element[i]->str;
                     if (member_uid != state.sender_uid) {
                         redis.sadd("recv_group:" + state.group_uid + ":" + member_uid, state.file_path);
                         if (redis.hexists("is_online", member_uid)) {
@@ -1855,20 +1864,22 @@ void handleGetManagedGroupsRequest(int epfd, int fd, const nlohmann::json& msg) 
 
     // 获取创建的群
     string created_key = "created" + my_uid;
-    redisReply **created_reply = redis.smembers(created_key);
+    redisReply *created_reply = redis.smembers(created_key);
     if (created_reply) {
-        for (int i = 0; created_reply[i] != nullptr; ++i) {
-            managed_group_uids.insert(created_reply[i]->str);
+        for (size_t i = 0; i < created_reply->elements; ++i) {
+            if (created_reply->element[i] == nullptr || created_reply->element[i]->str == nullptr) continue;
+            managed_group_uids.insert(created_reply->element[i]->str);
         }
         freeReplyObject(created_reply);
     }
 
     // 获取管理的群
     string managed_key = "managed" + my_uid;
-    redisReply **managed_reply = redis.smembers(managed_key);
+    redisReply *managed_reply = redis.smembers(managed_key);
     if (managed_reply) {
-        for (int i = 0; managed_reply[i] != nullptr; ++i) {
-            managed_group_uids.insert(managed_reply[i]->str);
+        for (size_t i = 0; i < managed_reply->elements; ++i) {
+            if (managed_reply->element[i] == nullptr || managed_reply->element[i]->str == nullptr) continue;
+            managed_group_uids.insert(managed_reply->element[i]->str);
         }
         freeReplyObject(managed_reply);
     }
@@ -1910,12 +1921,13 @@ void handleGetGroupJoinRequests(int epfd, int fd, const nlohmann::json& msg) {
     // TODO: 权限检查，确保 my_uid 是 group_uid 的管理员
 
     string request_key = "if_add" + group_uid;
-    redisReply **replies = redis.smembers(request_key);
+    redisReply *replies = redis.smembers(request_key);
 
     nlohmann::json requesters = nlohmann::json::array();
     if (replies) {
-        for (int i = 0; replies[i] != nullptr; ++i) {
-            string requester_uid = replies[i]->str;
+        for (size_t i = 0; i < replies->elements; ++i) {
+            if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
+            string requester_uid = replies->element[i]->str;
             string user_info_str = redis.hget("user_info", requester_uid);
             if (!user_info_str.empty()) {
                 try {
@@ -1999,11 +2011,12 @@ void handleGetGroupMembersRequest(int epfd, int fd, const nlohmann::json& msg) {
     Group group;
     group.json_parse(group_info_str);
 
-    redisReply **replies = redis.smembers(group.getMembers());
+    redisReply *replies = redis.smembers(group.getMembers());
     nlohmann::json members = nlohmann::json::array();
     if (replies) {
-        for (int i = 0; replies[i] != nullptr; ++i) {
-            string member_uid = replies[i]->str;
+        for (size_t i = 0; i < replies->elements; ++i) {
+            if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
+            string member_uid = replies->element[i]->str;
             string user_info_str = redis.hget("user_info", member_uid);
             if (!user_info_str.empty()) {
                 members.push_back(nlohmann::json::parse(user_info_str));
@@ -2131,11 +2144,12 @@ void handleGetGroupAdminsRequest(int epfd, int fd, const nlohmann::json& msg) {
         return;
     }
 
-    redisReply **replies = redis.smembers(group.getAdmins());
+    redisReply *replies = redis.smembers(group.getAdmins());
     nlohmann::json admins = nlohmann::json::array();
     if (replies) {
-        for (int i = 0; replies[i] != nullptr; ++i) {
-            string admin_uid = replies[i]->str;
+        for (size_t i = 0; i < replies->elements; ++i) {
+            if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
+            string admin_uid = replies->element[i]->str;
             string user_info_str = redis.hget("user_info", admin_uid);
             if (!user_info_str.empty()) {
                 admins.push_back(nlohmann::json::parse(user_info_str));
@@ -2218,10 +2232,11 @@ void handleDeleteGroupRequest(int epfd, int fd, const nlohmann::json& msg) {
     }
 
     // 通知所有成员
-    redisReply **members_reply = redis.smembers(group.getMembers());
+    redisReply *members_reply = redis.smembers(group.getMembers());
     if (members_reply) {
-        for (int i = 0; members_reply[i] != nullptr; ++i) {
-            string member_uid = members_reply[i]->str;
+        for (size_t i = 0; i < members_reply->elements; ++i) {
+            if (members_reply->element[i] == nullptr || members_reply->element[i]->str == nullptr) continue;
+            string member_uid = members_reply->element[i]->str;
             if (member_uid == my_uid) continue;
             // TODO: 升级为JSON通知
             if (redis.hexists("unified_receiver", member_uid)) {
@@ -2272,11 +2287,12 @@ void handleGetJoinedGroupsRequest(int epfd, int fd, const nlohmann::json& msg) {
     if (!redis.connect()) { /* ... error handling ... */ return; }
 
     string joined_key = "joined" + my_uid;
-    redisReply **replies = redis.smembers(joined_key);
+    redisReply *replies = redis.smembers(joined_key);
     nlohmann::json joined_groups = nlohmann::json::array();
     if (replies != nullptr) {
-        for (int i = 0; replies[i] != nullptr; ++i) {
-            string group_uid = replies[i]->str;
+        for (size_t i = 0; i < replies->elements; ++i) {
+            if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
+            string group_uid = replies->element[i]->str;
             string group_info_str = redis.hget("group_info", group_uid);
             if (!group_info_str.empty()) {
                 try {
@@ -2286,6 +2302,7 @@ void handleGetJoinedGroupsRequest(int epfd, int fd, const nlohmann::json& msg) {
                 }
             }
         }
+        freeReplyObject(replies);
     }
 
     response["data"]["success"] = true;
