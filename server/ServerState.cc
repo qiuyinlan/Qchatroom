@@ -6,6 +6,7 @@
 #include <sys/epoll.h>
 
 #include "Redis.h"
+#include <nlohmann/json.hpp>
 
 // Global variable definitions
 MySQL g_mysql;
@@ -108,7 +109,11 @@ void sendMsg(int epfd, int fd, std::string msg) {
                     temp.events = EPOLLIN | EPOLLET | EPOLLOUT;
                     epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &temp);
                     return;
+
+
                 }
+
+
                 // Other error, handled in handleCloseEvent
                 return;
             }
@@ -125,3 +130,36 @@ void sendMsg(int epfd, int fd, std::string msg) {
     }
 }
 
+
+
+std::string getUsernameFromRedis(const std::string& uid) {
+    Redis redis;
+    if (redis.connect()) {
+        std::string user_info_str = redis.hget("user_info", uid);
+        if (!user_info_str.empty()) {
+            try {
+                nlohmann::json user_json = nlohmann::json::parse(user_info_str);
+                return user_json.value("username", "");
+            } catch (const nlohmann::json::parse_error& e) {
+                return "";
+            }
+        }
+    }
+    return "";
+}
+
+std::string getGroupNameFromRedis(const std::string& group_uid) {
+    Redis redis;
+    if (redis.connect()) {
+        std::string group_info_str = redis.hget("group_info", group_uid);
+        if (!group_info_str.empty()) {
+            try {
+                nlohmann::json group_json = nlohmann::json::parse(group_info_str);
+                return group_json.value("group_name", "");
+            } catch (const nlohmann::json::parse_error& e) {
+                return "";
+            }
+        }
+    }
+    return "";
+}

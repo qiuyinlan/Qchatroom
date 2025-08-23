@@ -25,8 +25,7 @@
 #include "Redis.h"
 #include "User.h"
 #include "MySQL.h"
-#include "Transaction.h"
-#include "LoginHandler.h"
+
 #include "IO.h"
 #include "Group.h"
 #include "group_chat.h"
@@ -316,7 +315,7 @@ void handleMessage(int epfd, int fd, const std::string& json_msg) {
             case C2S_DEACTIVATE_ACCOUNT_REQUEST: handleDeactivateAccountRequest(epfd, fd, msg); break;
             case C2S_HEARTBEAT: handleHeartbeat(epfd, fd, msg); break;
 
-            // Friend Handlers
+            // Friend
             case C2S_ADD_FRIEND_REQUEST: handleAddFriendRequest(epfd, fd, msg); break;
             case C2S_GET_FRIEND_REQUESTS: handleGetFriendRequests(epfd, fd, msg); break;
             case C2S_RESPOND_TO_FRIEND_REQUEST: handleRespondToFriendRequest(epfd, fd, msg); break;
@@ -325,7 +324,7 @@ void handleMessage(int epfd, int fd, const std::string& json_msg) {
             case C2S_GET_BLOCKED_LIST_REQUEST: handleGetBlockedListRequest(epfd, fd, msg); break;
             case C2S_UNBLOCK_FRIEND_REQUEST: handleUnblockFriendRequest(epfd, fd, msg); break;
 
-            // Group Handlers
+            // Group
             case C2S_CREATE_GROUP_REQUEST: handleCreateGroupRequest(epfd, fd, msg); break;
             case C2S_JOIN_GROUP_REQUEST: handleJoinGroupRequest(epfd, fd, msg); break;
             case C2S_GET_MANAGED_GROUPS_REQUEST: handleGetManagedGroupsRequest(epfd, fd, msg); break;
@@ -340,7 +339,7 @@ void handleMessage(int epfd, int fd, const std::string& json_msg) {
             case C2S_INVITE_TO_GROUP_REQUEST: handleInviteToGroupRequest(epfd, fd, msg); break;
             case C2S_START_GROUP_CHAT_REQUEST: handleStartGroupChatRequest(epfd, fd, msg); break;
 
-            // Chat Handlers
+            // Chat
             case C2S_GET_CHAT_LISTS: handleGetChatLists(epfd, fd, msg); break;
             case C2S_START_CHAT_REQUEST: handleStartChatRequest(epfd, fd, msg); break;
             case C2S_PRIVATE_MESSAGE: handlePrivateMessage(epfd, fd, msg); break;
@@ -348,7 +347,7 @@ void handleMessage(int epfd, int fd, const std::string& json_msg) {
             case C2S_EXIT_CHAT_REQUEST: handleExitChatRequest(epfd, fd, msg); break;
             case C2S_GET_HISTORY_REQUEST: handleGetHistoryRequest(epfd, fd, msg); break;
 
-            // File Handlers
+            // File
             case C2S_SEND_FILE_REQUEST: handleSendFileRequest(epfd, fd, msg); break;
             case C2S_RECV_FILE_REQUEST: handleRecvFileRequest(epfd, fd, msg); break;
 

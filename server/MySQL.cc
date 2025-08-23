@@ -7,48 +7,7 @@
 using namespace std;
 using json = nlohmann::json;
 
-// 从Redis获取用户名
-string getUsernameFromRedis(const string& uid) {
-    Redis redis;
-    if (!redis.connect()) {
-        return uid; 
-    }
 
-    // 直接从uid_to_username哈希表获取用户名
-    string username = redis.hget("uid_to_username", uid);
-
-    if (!username.empty() && username != "(nil)") {
-        return username;
-    }
-
-    cout << "[DEBUG] uid_to_username not found, trying reverse lookup for UID: " << uid << endl;
-
-    return uid;
-}
-
-// 从Redis获取群聊名称
-string getGroupNameFromRedis(const string& group_uid) {
-    Redis redis;
-    if (!redis.connect()) {
-        return group_uid;
-    }
-
-    string group_info = redis.hget("group_info", group_uid);
-    if (group_info.empty() || group_info == "(nil)") {
-        return group_uid;
-    }
-
-    try {
-        json group_json = json::parse(group_info);
-        if (group_json.contains("groupName")) {
-            return group_json["groupName"].get<string>();
-        }
-    } catch (const json::exception& e) {
-        cout << "[DEBUG] 解析群聊信息JSON失败: " << e.what() << endl;
-    }
-
-    return group_uid;
-}
 
 MySQL::MySQL() : conn(nullptr) {}
 

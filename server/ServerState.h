@@ -33,5 +33,11 @@ void removeUserActivity(const std::string& uid);
 void removeFdMapping(int fd);
 void sendMsg(int epfd, int fd, std::string msg);
 
+// Helper functions for Redis lookups
+std::string getUsernameFromRedis(const std::string& uid);
+std::string getGroupNameFromRedis(const std::string& group_uid);
+
+
+
 #endif // SERVERSTATE_H
 

@@ -84,6 +84,26 @@ void handleLoginRequest(int epfd, int fd, const nlohmann::json& msg) {
     response["flag"] = S2C_LOGIN_SUCCESS;
     response["data"] = nlohmann::json::parse(user_info_str);
     sendMsg(epfd, fd, response.dump());
+
+    // Notify friends that this user is online
+    string friends_key = UID;
+    redisReply *replies = redis.smembers(friends_key);
+    if (replies) {
+        for (size_t i = 0; i < replies->elements; ++i) {
+            if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
+            string friend_uid = replies->element[i]->str;
+            if (redis.hexists("is_online", friend_uid)) {
+                int friend_fd = stoi(redis.hget("is_online", friend_uid));
+                nlohmann::json notification;
+                cout << "[状态通知] 用户 " << UID << " 上线, 正在通知好友 " << friend_uid << " (fd: " << friend_fd << ")" << endl;
+                notification["flag"] = S2C_FRIEND_STATUS_CHANGE;
+                notification["data"]["uid"] = UID;
+                notification["data"]["is_online"] = true;
+                sendMsg(epfd, friend_fd, notification.dump());
+            }
+        }
+        freeReplyObject(replies);
+    }
 }
 
 void handleLogoutRequest(int epfd, int fd, const nlohmann::json& msg) {
@@ -92,6 +112,25 @@ void handleLogoutRequest(int epfd, int fd, const nlohmann::json& msg) {
     if (!uid.empty()) {
         Redis redis;
         if (redis.connect()) {
+            // Notify friends that this user is offline BEFORE logging them out
+            string friends_key = uid;
+            redisReply *replies = redis.smembers(friends_key);
+            if (replies) {
+                for (size_t i = 0; i < replies->elements; ++i) {
+                    if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
+                    string friend_uid = replies->element[i]->str;
+                    if (redis.hexists("is_online", friend_uid)) {
+                        int friend_fd = stoi(redis.hget("is_online", friend_uid));
+                        cout << "[状态通知] 用户 " << uid << " 下线, 正在通知好友 " << friend_uid << " (fd: " << friend_fd << ")" << endl;
+                        nlohmann::json notification;
+                        notification["flag"] = S2C_FRIEND_STATUS_CHANGE;
+                        notification["data"]["uid"] = uid;
+                        notification["data"]["is_online"] = false;
+                        sendMsg(epfd, friend_fd, notification.dump());
+                    }
+                }
+                freeReplyObject(replies);
+            }
             redis.hdel("is_online", uid);
         }
         removeFdFromUid(fd);

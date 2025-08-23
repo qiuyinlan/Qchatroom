@@ -98,6 +98,7 @@
 #define S2C_SEND_FILE_RESPONSE 5101           // 发送文件响应
 #define S2C_RECV_FILE_RESPONSE 5201           // 接收文件响应
 #define S2C_FILE_NOTIFICATION 5301            // 新文件通知
+#define S2C_FRIEND_STATUS_CHANGE 5302        // 好友上下线通知
 #define S2C_GROUP_JOIN_REQUESTS_RESPONSE 3901 // 入群申请列表响应
 #define S2C_RESPOND_TO_GROUP_JOIN_RESPONSE 4001// 响应入群申请的响应
 
