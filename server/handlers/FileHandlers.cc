@@ -1,4 +1,165 @@
 #include "FileHandlers.h"
+#include "../ServerState.h"
+#include "../proto.h"
+#include "../Redis.h"
+#include "../User.h"
+#include "../Message.h"
+#include <iostream>
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <filesystem>
+
+using namespace std;
+
+// Helper function from the old server.cc, needed for notifications
+string getUsernameFromRedis(const string& uid) {
+    Redis redis;
+    if (redis.connect()) {
+        string user_info_str = redis.hget("user_info", uid);
+        if (!user_info_str.empty()) {
+            try {
+                nlohmann::json user_json = nlohmann::json::parse(user_info_str);
+                return user_json.value("username", "");
+            } catch (const nlohmann::json::parse_error& e) {
+                return "";
+            }
+        }
+    }
+    return "";
+}
+
+string getGroupNameFromRedis(const string& group_uid) {
+    Redis redis;
+    if (redis.connect()) {
+        string group_info_str = redis.hget("group_info", group_uid);
+        if (!group_info_str.empty()) {
+            try {
+                nlohmann::json group_json = nlohmann::json::parse(group_info_str);
+                return group_json.value("groupName", "");
+            } catch (const nlohmann::json::parse_error& e) {
+                return "";
+            }
+        }
+    }
+    return "";
+}
+
+void handleFileData(int epfd, int fd, const char* data, int len) {
+    lock_guard<mutex> lock(transfer_states_mutex);
+    if (fd_transfer_states.count(fd) == 0) return;
+
+    FileTransferState& state = fd_transfer_states.at(fd);
+    if (state.status != TransferStatus::RECEIVING) return;
+
+    state.file_stream.write(data, len);
+    state.transferred_bytes += len;
+
+    if (state.transferred_bytes >= state.file_size) {
+        cout << "[文件] fd=" << fd << " 文件接收完成: " << state.file_name << endl;
+        state.file_stream.close();
+
+        Redis redis;
+        redis.connect();
+
+        Message fileMessage;
+        fileMessage.setUsername(getUsernameFromRedis(state.sender_uid));
+        fileMessage.setUidFrom(state.sender_uid);
+        fileMessage.setContent("[文件]" + state.file_name);
+
+        if (state.chat_type == "private") {
+            fileMessage.setUidTo(state.receiver_uid);
+            g_mysql.insertPrivateMessage(state.sender_uid, state.receiver_uid, fileMessage.getContent());
+            redis.sadd("recv" + state.receiver_uid, state.file_path);
+
+            if (redis.hexists("is_online", state.receiver_uid)) {
+                int receiver_fd = stoi(redis.hget("is_online", state.receiver_uid));
+                nlohmann::json notification;
+                notification["flag"] = S2C_FILE_NOTIFICATION;
+                notification["data"]["sender_username"] = fileMessage.getUsername();
+                sendMsg(epfd, receiver_fd, notification.dump());
+            }
+        } else { // group
+            fileMessage.setUidTo(state.group_uid);
+            g_mysql.insertGroupMessage(state.group_uid, state.sender_uid, fileMessage.getContent());
+
+            redisReply *replies = redis.smembers("group_members:" + state.group_uid);
+            if (replies) {
+                for (size_t i = 0; i < replies->elements; ++i) {
+                    if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
+                    string member_uid = replies->element[i]->str;
+                    if (member_uid != state.sender_uid) {
+                        redis.sadd("recv_group:" + state.group_uid + ":" + member_uid, state.file_path);
+                        if (redis.hexists("is_online", member_uid)) {
+                            int member_fd = stoi(redis.hget("is_online", member_uid));
+                            nlohmann::json notification;
+                            notification["flag"] = S2C_FILE_NOTIFICATION;
+                            notification["data"]["group_name"] = getGroupNameFromRedis(state.group_uid);
+                            sendMsg(epfd, member_fd, notification.dump());
+                        }
+                    }
+                }
+                freeReplyObject(replies);
+            }
+        }
+        fd_transfer_states.erase(fd);
+    }
+}
+
+void handleFileWriteEvent(int epfd, int fd) {
+    lock_guard<mutex> lock(transfer_states_mutex);
+    if (fd_transfer_states.count(fd) == 0) return;
+
+    FileTransferState& state = fd_transfer_states.at(fd);
+    if (state.status != TransferStatus::SENDING) return;
+
+    char buffer[4096];
+    state.read_stream.read(buffer, sizeof(buffer));
+    streamsize bytes_read = state.read_stream.gcount();
+
+    if (bytes_read > 0) {
+        ssize_t n = send(fd, buffer, bytes_read, 0);
+        if (n > 0) {
+            state.transferred_bytes += n;
+        } else {
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                state.read_stream.seekg(-bytes_read, ios_base::cur);
+                return;
+            } else {
+                cerr << "[文件] fd=" << fd << " send错误, errno=" << errno << endl;
+                cleanupFileTransfer(fd);
+                return;
+            }
+        }
+    }
+
+    if (state.transferred_bytes >= state.file_size || state.read_stream.eof()) {
+        cout << "[文件] fd=" << fd << " 文件发送完成: " << state.file_path << endl;
+        cleanupFileTransfer(fd);
+        remove(state.file_path.c_str());
+
+        struct epoll_event temp;
+        temp.data.fd = fd;
+        temp.events = EPOLLIN | EPOLLET;
+        epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &temp);
+    }
+}
+
+void cleanupFileTransfer(int fd) {
+    lock_guard<mutex> lock(transfer_states_mutex);
+    if (fd_transfer_states.count(fd)) {
+        FileTransferState& state = fd_transfer_states.at(fd);
+        if (state.file_stream.is_open()) {
+            state.file_stream.close();
+            remove(state.file_path.c_str());
+            cout << "[文件] fd=" << fd << " 连接关闭, 删除部分文件: " << state.file_path << endl;
+        }
+        if (state.read_stream.is_open()) {
+            state.read_stream.close();
+        }
+        fd_transfer_states.erase(fd);
+    }
+}
 #include "../utils/proto.h"
 #include "../utils/IO.h"
 #include "../Redis.h"

@@ -218,57 +218,34 @@ int main(int argc, char *argv[]) {
 
 
 void handleReadEvent(int epfd, int fd, ThreadPool& pool) {
-    bool is_receiving_file = false;
+    bool is_file_transfer = false;
     {
         lock_guard<mutex> lock(transfer_states_mutex);
-        if (fd_transfer_states.count(fd) && fd_transfer_states[fd].status == TransferStatus::RECEIVING) {
-            is_receiving_file = true;
-        }
+        is_file_transfer = fd_transfer_states.count(fd) &&
+                           fd_transfer_states.at(fd).status == TransferStatus::RECEIVING;
     }
 
-    if (is_receiving_file) {
-        // Handle raw file data
+    if (is_file_transfer) {
         char buffer[4096];
-        while (true) {
-            ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
-            if (bytes_read > 0) {
-                handleFileData(epfd, fd, buffer, bytes_read);
-            } else if (bytes_read == 0) {
-                cout << "[文件] fd=" << fd << " 在文件传输中关闭了连接." << endl;
+        ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
+        if (bytes_read > 0) {
+            handleFileData(epfd, fd, buffer, bytes_read);
+        } else if (bytes_read == 0) {
+            handleCloseEvent(epfd, fd);
+        } else {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
                 handleCloseEvent(epfd, fd);
-                break;
-            } else { // bytes_read < 0
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    break;
-                } else {
-                    perror("recv");
-                    handleCloseEvent(epfd, fd);
-                    break;
-                }
             }
         }
     } else {
-        // Handle JSON messages
         string msg;
-        while (true) {
-            int recv_ret = recvMsg(fd, msg);
-            if (recv_ret > 0) {
-                cout << "[DEBUG] 从fd=" << fd << " 接收到完整消息" << msg << endl;
-                pool.addTask([epfd, fd, msg]() {
-                    handleMessage(epfd, fd, msg);
-                });
-                msg.clear();
-            } else if (recv_ret == 0) {
-                cout << "[INFO] recvMsg返回0, 客户端正常断开. fd=" << fd << endl;
-                handleCloseEvent(epfd, fd);
-                break;
-            } else if (recv_ret == -2) {
-                break;
-            } else {
-                cerr << "[ERROR] fd=" << fd << " 上的recvMsg发生错误, ret=" << recv_ret << endl;
-                handleCloseEvent(epfd, fd);
-                break;
-            }
+        int recv_ret = recvMsg(fd, msg);
+        if (recv_ret > 0) {
+            pool.addTask([epfd, fd, msg]() { handleMessage(epfd, fd, msg); });
+        } else if (recv_ret == 0) {
+            handleCloseEvent(epfd, fd);
+        } else if (recv_ret < 0 && recv_ret != -2) {
+            handleCloseEvent(epfd, fd);
         }
     }
 }
@@ -277,85 +254,30 @@ void handleWriteEvent(int epfd, int fd) {
     bool is_sending_file = false;
     {
         lock_guard<mutex> lock(transfer_states_mutex);
-        if (fd_transfer_states.count(fd) && fd_transfer_states[fd].status == TransferStatus::SENDING) {
-            is_sending_file = true;
-        }
+        is_sending_file = fd_transfer_states.count(fd) &&
+                          fd_transfer_states.at(fd).status == TransferStatus::SENDING;
     }
 
     if (is_sending_file) {
-        lock_guard<mutex> lock(transfer_states_mutex);
-        if (fd_transfer_states.count(fd) == 0) return; // State might have been cleared
-
-        FileTransferState& state = fd_transfer_states[fd];
-        char buffer[4096];
-        state.read_stream.read(buffer, sizeof(buffer));
-        streamsize bytes_read = state.read_stream.gcount();
-
-        if (bytes_read > 0) {
-            ssize_t n = send(fd, buffer, bytes_read, 0);
-            if (n > 0) {
-                state.transferred_bytes += n;
-            } else {
-                if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                    // Kernel buffer full, seek back and wait for next EPOLLOUT
-                    state.read_stream.seekg(-bytes_read, ios_base::cur);
-                    return;
-
-
-                } else {
-                    cerr << "[文件] fd=" << fd << " send错误, errno=" << errno << endl;
-                    handleCloseEvent(epfd, fd);
-                    return;
-                }
-            }
-        }
-
-        if (state.transferred_bytes >= state.file_size) {
-            cout << "[文件] fd=" << fd << " 文件发送完成: " << state.file_path << endl;
-            state.read_stream.close();
-
-            // Cleanup
-            Redis redis;
-            if (redis.connect()) {
-                string my_uid = getUidByFd(fd);
-                // This is complex, need to find the original queue key
-                // For now, we assume the client will remove it. A better approach is needed.
-            }
-
-            remove(state.file_path.c_str());
-            fd_transfer_states.erase(fd);
-
-            struct epoll_event temp;
-            temp.data.fd = fd;
-            temp.events = EPOLLIN | EPOLLET;
-            epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &temp);
-        }
+        handleFileWriteEvent(epfd, fd);
     } else {
-        // Original logic for JSON messages
-        cout << "[DEBUG] fd=" << fd << " 的写事件触发 (JSON)" << endl;
         SendBuffer& buf = sendBuffers[fd];
-
         while (buf.sent_bytes < buf.data.size()) {
             ssize_t n = send(fd, buf.data.data() + buf.sent_bytes, buf.data.size() - buf.sent_bytes, 0);
             if (n > 0) {
                 buf.sent_bytes += n;
             } else {
                 if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                    return;
-
-
+                    return; // Wait for next EPOLLOUT
                 }
-                cerr << "[ERROR] fd=" << fd << " 上发生send错误, errno=" << errno << endl;
                 handleCloseEvent(epfd, fd);
                 return;
             }
         }
 
         if (buf.sent_bytes == buf.data.size()) {
-            cout << "[DEBUG] fd=" << fd << " 的缓冲数据发送完毕" << endl;
             buf.data.clear();
             buf.sent_bytes = 0;
-
             struct epoll_event temp;
             temp.data.fd = fd;
             temp.events = EPOLLIN | EPOLLET;
@@ -366,20 +288,7 @@ void handleWriteEvent(int epfd, int fd) {
 
 void handleCloseEvent(int epfd, int fd) {
     cout << "[INFO] Client disconnected: " << fd << endl;
-
-    // Cleanup file transfer state if any
-    {
-        lock_guard<mutex> lock(transfer_states_mutex);
-        if (fd_transfer_states.count(fd)) {
-            FileTransferState& state = fd_transfer_states[fd];
-            if (state.file_stream.is_open()) {
-                state.file_stream.close();
-                remove(state.file_path.c_str());
-                cout << "[文件] fd=" << fd << " 连接关闭, 删除部分文件: " << state.file_path << endl;
-            }
-            fd_transfer_states.erase(fd);
-        }
-    }
+    cleanupFileTransfer(fd);
 
     Redis redis;
     if (redis.connect()) {
@@ -392,7 +301,6 @@ void handleCloseEvent(int epfd, int fd) {
     }
 
     removeFdMapping(fd);
-
     epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
     close(fd);
 }

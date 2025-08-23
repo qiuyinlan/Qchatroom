@@ -12,10 +12,5 @@ void handleFileData(int epfd, int fd, const char* data, int len);
 void handleFileWriteEvent(int epfd, int fd);
 void cleanupFileTransfer(int fd);
 
-// Function declarations for low-level file data handling
-void handleFileData(int epfd, int fd, const char* data, int len);
-void handleFileWriteEvent(int epfd, int fd);
-void cleanupFileTransfer(int fd);
-
 #endif // FILEHANDLERS_H
 
