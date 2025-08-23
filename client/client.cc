@@ -5,6 +5,7 @@
 #include <csignal>
 #include <atomic>
 #include <mutex>
+#include "../utils/IO.h"
 #include "client.h"
 #include "../utils/TCP.h"
 #include "StartMenu.h"
@@ -87,6 +88,7 @@ int main(int argc, char *argv[]) {
         Connect(fd, IP, PORT);
         if (opt == 1) {
             if (login(fd, user)) {
+
                 clientOperation(fd, user);
             }
             close(fd);  // 登录完成后关闭连接

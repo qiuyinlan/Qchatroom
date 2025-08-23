@@ -9,9 +9,10 @@
 #include <atomic>
 #include <unistd.h>
 #include <chrono>
+#include "nlohmann/json.hpp"
 
 using namespace std;
-
+using json = nlohmann::json;
 
 std::atomic<bool> stopNotify{false};
 
@@ -48,17 +49,18 @@ void unifiedMessageReceiver( string UID) {
     int receiveFd = Socket();
     Connect(receiveFd, IP, PORT);
 
-    // 统一接收协议
-    sendMsg(receiveFd, UNIFIED_RECEIVER);
-    sendMsg(receiveFd, UID);
+    // 新协议不再需要手动注册接收者，服务器通过心跳来识别
 
     string receivedMsg;
 
     // 启动心跳发送线程
-    thread heartbeatThread([receiveFd]() {
+    thread heartbeatThread([receiveFd, UID]() {
         while (true) {
-            sleep(30);  
-            if (sendMsg(receiveFd, "HEARTBEAT") <= 0) {
+            sleep(30);
+            json heartbeat_req;
+            heartbeat_req["flag"] = C2S_HEARTBEAT;
+            heartbeat_req["data"]["uid"] = UID; // 在心跳中携带UID
+            if (sendMsg(receiveFd, heartbeat_req.dump()) <= 0) {
                 cout << "[心跳] 心跳发送失败，连接可能断开" << endl;
                 break;
             }

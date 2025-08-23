@@ -10,10 +10,12 @@
 #include <iostream>
 #include <thread>
 #include <iomanip>
+#include "nlohmann/json.hpp"
 #include "../utils/proto.h"
 #include "../utils/IO.h"
 
 using namespace std;
+using json = nlohmann::json;
 
 void operationMenu() {
    std::cout << "\033[1;34m--------------------------------------\033[0m" << std::endl;
@@ -26,51 +28,7 @@ void operationMenu() {
     cout << BLUE << "请输入你的选择" << RESET << endl;
 }
 
-void syncFriends(int fd, string my_uid, vector<pair<string, User>> &my_friends) {
-  
-    int send_ret = sendMsg(fd, SYNC);
-    if (send_ret <= 0) {     //发送 SYNC
-        cout << "服务器连接已断开，无法同步好友列表" << endl;
-        return ;
-    }
-   
-    my_friends.clear();               
-    string friend_num ;
-    // 接收好友个数
-    int recv_ret = recvMsg(fd, friend_num);
-    if (recv_ret <= 0) { 
-         cout << "服务器连接已断开，无法获取好友信息" << endl;
-        return ;
-    }
-    int num;
-    try {
-        num = stoi(friend_num);
 
-    } catch (const exception& e) {
-        cout << "[ERROR] 解析好友数量失败: " << e.what() << ", 内容: '" << friend_num << "'" << endl;
-        return;
-    }
-
-    User myfriend;
-    string friend_info;
-   
-    for (int i = 0; i < num; i++) {
-         //收好友详细信息
-       int recv_ret2 = recvMsg(fd, friend_info);
-        if (recv_ret2 <= 0) {
-            cout << "服务器连接已断开，好友信息同步中断" << endl;
-            return ;
-        }
-        try {
-            myfriend.json_parse(friend_info);
-            my_friends.emplace_back(my_uid, myfriend);
-        } catch (const exception& e) {
-            cout << "[ERROR] 解析好友信息失败: " << e.what() << endl;
-            cout << "[ERROR] 原始数据: " << friend_info << endl;
-        }
-    }
-    return ;
-}
 
 
 void clientOperation(int fd, User &user) {
@@ -80,7 +38,7 @@ void clientOperation(int fd, User &user) {
     FriendManager friendManager(fd, user);
     ChatSession chatSession(fd, user);
     G_chat gChat(fd, user);
-    FileTransfer fileTransfer(fd, user);
+        FileTransfer fileTransfer;
     
 
     // thread heartbeatThread(heartbeat, user.getUID());
@@ -105,7 +63,9 @@ void clientOperation(int fd, User &user) {
         }
         //0退出登陆
         if (option == "0") {
-            if (sendMsg(fd, BACK) <= 0) {
+            json req;
+            req["flag"] = C2S_LOGOUT_REQUEST;
+            if (sendMsg(fd, req.dump()) <= 0) {
                 cout << "服务器连接已断开，客户端退出" << endl;
             } else {
                 cout << "退出成功" << endl;
@@ -124,22 +84,52 @@ void clientOperation(int fd, User &user) {
             std::cout << "输入格式错误 请重新输入" << std::endl;
             continue;
         }
-        // 同步好友列表，宏定义17
-        //输入选项之后，会同步好友列表
-        syncFriends(fd, my_uid, my_friends);
-
-        // if-else分发
-        //私聊
-        
         if (opt == 1) {
-            // 获取群聊列表,宏定义20
-            vector<Group> joinedGroup;
-                G_chat gChat(fd, user);
-                gChat.syncGL(joinedGroup);
+            json req;
+            req["flag"] = C2S_GET_CHAT_LISTS;
+            if (sendMsg(fd, req.dump()) <= 0) {
+                cout << "服务器连接已断开，无法获取聊天列表" << endl;
+                continue;
+            }
 
-                // 调用统一聊天界面
-                chatSession.startChat(my_friends, joinedGroup);
-            
+            string res_str;
+            if (recvMsg(fd, res_str) <= 0) {
+                cout << "服务器连接已断开，获取聊天列表失败" << endl;
+                continue;
+            }
+
+            try {
+                json res = json::parse(res_str);
+                if (res.value("flag", 0) == S2C_CHAT_LISTS_RESPONSE) {
+                    my_friends.clear();
+                    vector<Group> joinedGroup;
+
+                    // 解析好友列表
+                    if (res["data"].contains("friends")) {
+                        for (const auto& friend_json : res["data"]["friends"]) {
+                            User myfriend;
+                            myfriend.json_parse(friend_json);
+                            my_friends.emplace_back(my_uid, myfriend);
+                        }
+                        cout << "[DEBUG] Parsed " << my_friends.size() << " friends." << endl;
+                    }
+
+                    // 解析群组列表
+                    if (res["data"].contains("groups")) {
+                        for (const auto& group_json : res["data"]["groups"]) {
+                            Group group;
+                            group.json_parse(group_json.dump()); // 假设Group有json_parse方法
+                            joinedGroup.push_back(group);
+                        }
+                    }
+
+                    chatSession.startChat(my_friends, joinedGroup);
+                } else {
+                    cout << "获取聊天列表失败: " << res["data"].value("reason", "未知错误") << endl;
+                }
+            } catch (const json::parse_error& e) {
+                cerr << "解析聊天列表响应失败: " << e.what() << endl;
+            }
         } else if (opt == 2) {
             friendManager.addFriend(my_friends);
         } else if (opt == 3) {
@@ -154,50 +144,50 @@ void clientOperation(int fd, User &user) {
             gChat.groupctrl(my_friends);
         } else if (opt == 8) {
             vector<Group> joinedGroup;
-            G_chat gChat(fd, user);
+            friendManager.listFriends(my_friends, joinedGroup);
             gChat.syncGL(joinedGroup);
-                // 调用统一history界面
             chatSession.history(my_friends, joinedGroup);
         } else if (opt == 9) {
-            deactivateAccount(fd, user);
-            return;
+            if (deactivateAccount(fd, user)) {
+                return; // 注销成功，退出循环
+            }
         } else {
             cout << "没有这个选项，请重新输入" << endl;
         }
     }
 }
 
-// 注销账户  bugfix:注销的时候，统一接收线程要断开！！
-void deactivateAccount(int fd, User &user) {
-    
-//     string num_str;
-//    recvMsg(fd,num_str);
-//    if(num_str == "0"){
+bool deactivateAccount(int fd, User &user) {
+    cout << "\n警告：注销账户将永久删除您的所有数据，包括好友和聊天记录。" << endl;
+    cout << "此操作无法撤销。您确定要继续吗？ (输入 'yes' 以确认): ";
+    string confirmation;
+    getline(cin, confirmation);
 
-//    }
+    if (confirmation == "yes") {
+        nlohmann::json req;
+        req["flag"] = C2S_DEACTIVATE_ACCOUNT_REQUEST;
+        sendMsg(fd, req.dump());
 
-    cout << "\n=== 账户注销 ===" << endl;
-    cout << "警告：注销后您将无法再次使用此用户名，也无法使用此邮箱登录！" << endl;
-    cout << "您的账户信息将被保留，但无法接收消息与登陆,你创建的所有群聊将被自动解散" << endl;
-    cout << "确定要注销账户吗？(y/n): ";
-    
-    string choice;
-    getline(cin, choice);
-    
-    if (choice == "y" || choice == "Y" || choice == "yes" || choice == "YES") {
-        // 发送注销协议
-        sendMsg(fd, DEACTIVATE_ACCOUNT);
-        
-    
-            cout << "账户已成功注销！" << endl;
-            cout << "稍等...您将退出登录..." << endl;
-            // 发送退出登录协议
-            sleep(1);
-            sendMsg(fd, BACK);
-            return;
-        
+        string response_str;
+        if (recvMsg(fd, response_str) > 0) {
+            try {
+                auto res = nlohmann::json::parse(response_str);
+                if (res["flag"].get<int>() == S2C_DEACTIVATE_ACCOUNT_RESPONSE && res["data"]["success"].get<bool>()) {
+                    cout << "[系统提示] " << res["data"].value("reason", "") << endl;
+                    cout << "感谢您的使用，再见。" << endl;
+                    return true; // 注销成功
+                } else {
+                    cout << "[错误] 注销失败: " << res["data"].value("reason", "未知错误") << endl;
+                }
+            } catch (const nlohmann::json::parse_error& e) {
+                cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
+            }
+        } else {
+            cout << "[错误] 未收到服务器确认，请重新登录后再试。" << endl;
+        }
     } else {
-        cout << "取消注销操作" << endl;
+        cout << "已取消注销操作。" << endl;
     }
+    return false; // 注销失败或取消
 }
 

@@ -4,6 +4,7 @@
 
 #include <hiredis/hiredis.h>
 #include <string>
+#include <vector>
 
 using std::string;
 
@@ -34,6 +35,7 @@ public:
     int llen(const std::string &key);
     redisReply **lrange(const std::string &key, const std::string &start, const std::string &stop);
     redisReply **lrange(const std::string &key);
+    std::vector<std::string> lrange_vec(const std::string &key, int start, int stop);
     void lpush(const std::string &key, const std::string &value);
     redisReply **hgetall(const std::string &key);
     int hlen(const std::string &key);

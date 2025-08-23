@@ -9,270 +9,299 @@ using namespace std;
 
 FriendManager::FriendManager(int fd, User user) : fd(fd), user(std::move(user)) {}
 
+void FriendManager::listFriends(std::vector<std::pair<std::string, User>> &my_friends, std::vector<Group> &joinedGroup) {
+    nlohmann::json req;
+    req["flag"] = C2S_GET_CHAT_LISTS;
+    sendMsg(fd, req.dump());
+
+    string response_str;
+    if (recvMsg(fd, response_str) <= 0) {
+        cout << "[错误] 从服务器获取好友列表失败" << endl;
+        return;
+    }
+
+    try {
+        nlohmann::json res = nlohmann::json::parse(response_str);
+        if (res["flag"].get<int>() == S2C_CHAT_LISTS_RESPONSE) {
+            my_friends.clear();
+            if (res["data"].contains("friends")) {
+                for (const auto& friend_json : res["data"]["friends"]) {
+                    User friend_user;
+                    friend_user.json_parse(friend_json.dump());
+                    my_friends.push_back({"", friend_user});
+                }
+            }
+
+            joinedGroup.clear();
+            if (res["data"].contains("groups")) {
+                for (const auto& group_json : res["data"]["groups"]) {
+                    Group group;
+                    group.json_parse(group_json.dump());
+                    joinedGroup.push_back(group);
+                }
+            }
+        }
+    } catch (const nlohmann::json::parse_error& e) {
+        cout << "[错误] 解析好友列表响应失败: " << e.what() << endl;
+    }
+}
+
 
 void FriendManager::addFriend(vector<pair<string, User>> &my_friends) const {
-    sendMsg(fd, ADD_FRIEND);
     string username;
-    while (true) {
-        cout << "请输入你要添加好友的用户名：" << endl;
-        return_last();
-        getline(cin, username);
-        if (username.empty()){
-            cout << "用户名不能为空" << endl;
-            continue;
-        }
-        if (username == "0") {
-            sendMsg(fd,"0");
-            return;
-        }
-        if (cin.eof()) {
-            cout << "读到文件结尾" << endl;
-            return;
-        }
-        if (username.find(' ') != string::npos) {
-            cout << "用户名不允许出现空格" << endl;
-            continue;
-        }
-        sendMsg(fd, username);
-        string temp;
-        recvMsg(fd, temp);
-        if (temp == "-1") {
-            cout << "该用户不存在" << endl;
-            return;
-        } else if (temp == "-2") {
-            cout << "该用户已经是你的好友，无法多次添加" << endl;
-            return;
-        } else if (temp == "-3") {
-            cout << "你不能添加自己为好友！" << endl;
-            return;
-        } else if (temp == "-5") {
-            cout << "你已经发送过好友申请，请等待对方处理" << endl;
-            return;
-        } else if (temp == "-6") {
-            cout << "该用户已注销，无法添加" << endl;
-            return;
-        }
-        break;
+    cout << "\n======================================" << endl;
+    cout << "请输入要添加好友的用户名: ";
+    cin >> username;
+
+    if (username == "0") {
+        return;
     }
-    User her;
-    string user_info;
-    recvMsg(fd, user_info);
-    her.json_parse(user_info);
-    cout << "你已成功发出好友申请，等待" << her.getUsername() << "的同意" << endl;
+
+    nlohmann::json req;
+    req["flag"] = C2S_ADD_FRIEND_REQUEST;
+    req["data"]["friend_username"] = username;
+    sendMsg(fd, req.dump());
+
+    // 等待并接收服务器的响应
+    string response_str;
+    if (recvMsg(fd, response_str) > 0) {
+        try {
+            nlohmann::json res = nlohmann::json::parse(response_str);
+            if (res["flag"].get<int>() == S2C_ADD_FRIEND_RESPONSE) {
+                string reason = res["data"]["reason"].get<string>();
+                cout << "[系统提示] " << reason << endl;
+            } else {
+                cout << "[错误] 收到未知的响应类型" << endl;
+            }
+        } catch (const nlohmann::json::parse_error& e) {
+            cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
+        }
+    } else {
+        cout << "[错误] 从服务器接收响应失败" << endl;
+    }
+    cout << "======================================\n" << endl;
 }
 
 void FriendManager::findRequest(vector<pair<string, User>> &my_friends) const {
-    sendMsg(fd, FIND_REQUEST);
-    string nums;
-    recvMsg(fd, nums);
-    int num = stoi(nums);
-    if (num == 0) {
-        string temp;
-        cout << "目前没有好友申请，按enter返回" << endl;
-        getline(cin, temp);
-        if (cin.eof()) {
-            cout << "读到文件结尾" << endl;
-            return;
-        }
+    nlohmann::json get_req;
+    get_req["flag"] = C2S_GET_FRIEND_REQUESTS;
+    sendMsg(fd, get_req.dump());
+
+    string response_str;
+    if (recvMsg(fd, response_str) <= 0) {
+        cout << "[错误] 从服务器接收响应失败" << endl;
         return;
     }
-    cout << "你收到" << num << "条好友申请" << endl;
-    string friendRequestName,user_info;
-    for (int i = 0; i < num; i++) {
-        recvMsg(fd, friendRequestName);
-        cout << "收到" << friendRequestName << "的好友申请 [1]同意 [2]拒绝 [3]忽略 [0]返回菜单" << endl;
-        int choice;
-        while (!(cin >> choice) || (choice != 0 && choice != 1 && choice != 2 && choice != 3)) {
-            if (cin.eof()) {
-                cout << "读到文件结尾" << endl;
-                return;
-            }
-            cout << "输入格式错误" << endl;
-            cin.clear();
-            cin.ignore(INT32_MAX, '\n');
-        }
-        cin.ignore(INT32_MAX, '\n');
-        string reply;
-        if (choice == 0) {
-            sendMsg(fd, "0");
+
+    try {
+        nlohmann::json res = nlohmann::json::parse(response_str);
+        if (res["flag"].get<int>() != S2C_FRIEND_REQUESTS_RESPONSE || !res["data"]["success"].get<bool>()) {
+            cout << "[错误] 获取好友请求列表失败: " << res["data"].value("reason", "未知错误") << endl;
             return;
-        } else if ( choice == 1) {
-            sendMsg(fd, "ACCEPT");
-            cout << "好友添加成功" << endl;
-            continue;
-        } else if ( choice == 2) {
-            sendMsg(fd, "REFUSE");
-            recvMsg(fd,user_info);
-            User her;
-            her.json_parse(user_info);
-            cout << "你已拒绝" << her.getUsername() << "的好友申请" << endl;
-            continue;
-        } else if ( choice == 3) {
-            sendMsg(fd, "IGNORE");
-            cout << "你已忽略" << friendRequestName << "的好友申请,下次再做决定" << endl;
-            continue;
         }
+
+        auto requests = res["data"]["requests"];
+        if (requests.empty()) {
+            cout << "\n目前没有好友申请。\n" << endl;
+            return;
+        }
+
+        cout << "\n你收到 " << requests.size() << " 条好友申请:" << endl;
+        cout << "======================================" << endl;
+
+        for (const auto& req_user_json : requests) {
+            User requester;
+            requester.json_parse(req_user_json.dump());
+
+            cout << "收到来自 " << requester.getUsername() << " (UID: " << requester.getUID() << ") 的好友申请。" << endl;
+            cout << "请选择: [1]同意 [2]拒绝 [3]忽略 [0]返回菜单" << endl;
+
+            int choice;
+            cin >> choice;
+            cin.ignore(INT32_MAX, '\n');
+
+            if (choice == 0) break;
+            if (choice == 3) continue;
+
+            if (choice == 1 || choice == 2) {
+                nlohmann::json respond_req;
+                respond_req["flag"] = C2S_RESPOND_TO_FRIEND_REQUEST;
+                respond_req["data"]["requester_uid"] = requester.getUID();
+                respond_req["data"]["accepted"] = (choice == 1);
+                sendMsg(fd, respond_req.dump());
+
+                string respond_res_str;
+                if (recvMsg(fd, respond_res_str) > 0) {
+                    auto respond_res = nlohmann::json::parse(respond_res_str);
+                    cout << "[系统提示] " << respond_res["data"].value("reason", "") << endl;
+                } else {
+                    cout << "[错误] 未收到服务器确认" << endl;
+                }
+            }
+        }
+        cout << "======================================\n" << endl;
+
+    } catch (const nlohmann::json::parse_error& e) {
+        cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
     }
 }
 
 void FriendManager::delFriend(vector<pair<string, User>> &my_friends) {
-    string temp;
     if (my_friends.empty()) {
-        cout << "你当前没有好友捏... 请按enter返回" << endl;
-        getline(cin, temp);
-        if (cin.eof()) {
-            cout << "读到文件结尾" << endl;
-            return;
-        }
+        cout << "\n你当前没有好友。\n" << endl;
         return;
     }
-    cout <<  "你的好友列表" << endl;
-    cout << "----------------------------------------" << endl;
+
+    cout << "\n你的好友列表:" << endl;
+    cout << "======================================" << endl;
     for (int i = 0; i < my_friends.size(); ++i) {
-        cout << i + 1 << "." << my_friends[i].second.getUsername() << endl;
+        cout << i + 1 << ". " << my_friends[i].second.getUsername() << endl;
     }
-    cout << "----------------------------------------" << endl;
-    while (true) {
-        cout << "请输入要删除的好友" << endl;
-        return_last();
-        string del;
-        getline(cin, del);
+    cout << "======================================" << endl;
+    cout << "请输入要删除的好友序号 (输入0返回): ";
 
-        if (del == "0"){
-            sendMsg(fd,"0");
-            return;
-        }
-        if (cin.eof()) {
-            cout << "读到文件结尾" << endl;
-            return;
-        }
+    int who;
+    cin >> who;
+    cin.ignore(INT32_MAX, '\n');
 
-        if (del.empty()) {
-            cout << "输入不能为空，请重新输入" << endl;
-            continue;
-        }
+    if (who == 0) return;
+    if (who < 1 || who > my_friends.size()) {
+        cout << "[错误] 无效的序号。" << endl;
+        return;
+    }
 
-        int who;
+    nlohmann::json req;
+    req["flag"] = C2S_DELETE_FRIEND_REQUEST;
+    req["data"]["friend_uid"] = my_friends[who - 1].second.getUID();
+    sendMsg(fd, req.dump());
+
+    string response_str;
+    if (recvMsg(fd, response_str) > 0) {
         try {
-            who = stoi(del);
-        } catch (const exception& e) {
-            cout << "输入格式错误，请输入数字" << endl;
-            continue;
+            auto res = nlohmann::json::parse(response_str);
+            if (res["flag"].get<int>() == S2C_DELETE_FRIEND_RESPONSE) {
+                cout << "[系统提示] " << res["data"].value("reason", "") << endl;
+            } else {
+                cout << "[错误] 收到未知的响应类型" << endl;
+            }
+        } catch (const nlohmann::json::parse_error& e) {
+            cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
         }
-
-        if (who < 1 || who > my_friends.size()) {
-            cout << "输入超出范围，请输入1-" << my_friends.size() << "之间的数字" << endl;
-            continue;
-        }
-
-        //向服务器发送删除好友的信号
-        sendMsg(fd, DEL_FRIEND);
-        
-        who--;  
-        sendMsg(fd, my_friends[who].second.getUID());
-
-        cout << "已删除好友 " << my_friends[who].second.getUsername() << endl;
-        break;  
+    } else {
+        cout << "[错误] 未收到服务器确认" << endl;
     }
+    cout << "======================================\n" << endl;
 }
 
 void FriendManager::blockedLists(vector<pair<string, User>> &my_friends) const {
-    string temp;
     if (my_friends.empty()) {
-        cout << "你当前没有好友捏... 请按enter返回" << endl;
-        getline(cin, temp);
-        if (cin.eof()) {
-            cout << "读到文件结尾" << endl;
-            return;
-        }
+        cout << "\n你当前没有好友。\n" << endl;
         return;
     }
-    cout << "好友列表" << endl;
-    cout << "-----------------------------------------" << endl;
+
+    cout << "\n好友列表:" << endl;
+    cout << "======================================" << endl;
     for (int i = 0; i < my_friends.size(); ++i) {
-        cout << i + 1 << ": " << my_friends[i].second.getUsername() << endl;
+        cout << i + 1 << ". " << my_friends[i].second.getUsername() << endl;
     }
-    cout << "-----------------------------------------" << endl;
-    cout << "请输入你要屏蔽的好友的序号" << endl;
-    return_last();
+    cout << "======================================" << endl;
+    cout << "请输入要屏蔽的好友序号 (输入0返回): ";
+
     int who;
-    while (!(cin >> who) || who <= 0 || who > my_friends.size()) {
-        if (cin.eof()) {
-            cout << "读到文件结尾" << endl;
-            return;
-        }
-        if (who == 0)
-        {
-            return;
-        }
-        
-        cout << "输入格式错误" << endl;
-        cin.clear();
-        cin.ignore(INT32_MAX, '\n');
-    }
+    cin >> who;
     cin.ignore(INT32_MAX, '\n');
-    sendMsg(fd, BLOCKED_LISTS);
-    who--;
-    sendMsg(fd, my_friends[who].second.getUID());
-    cout << "你已成功屏蔽" << my_friends[who].second.getUsername() << ", 按enter返回" << endl;
-    getline(cin, temp);
-    if (cin.eof()) {
-        cout << "读到文件结尾" << endl;
+
+    if (who == 0) return;
+    if (who < 1 || who > my_friends.size()) {
+        cout << "[错误] 无效的序号。" << endl;
         return;
     }
+
+    nlohmann::json req;
+    req["flag"] = C2S_BLOCK_FRIEND_REQUEST;
+    req["data"]["friend_uid"] = my_friends[who - 1].second.getUID();
+    sendMsg(fd, req.dump());
+
+    string response_str;
+    if (recvMsg(fd, response_str) > 0) {
+        try {
+            auto res = nlohmann::json::parse(response_str);
+            if (res["flag"].get<int>() == S2C_BLOCK_FRIEND_RESPONSE) {
+                cout << "[系统提示] " << res["data"].value("reason", "") << endl;
+            } else {
+                cout << "[错误] 收到未知的响应类型" << endl;
+            }
+        } catch (const nlohmann::json::parse_error& e) {
+            cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
+        }
+    } else {
+        cout << "[错误] 未收到服务器确认" << endl;
+    }
+    cout << "======================================\n" << endl;
 }
 
 void FriendManager::unblocked(vector<pair<string, User>> &my_friends) const {
-    sendMsg(fd, UNBLOCKED);
-    cout << "已屏蔽好友" << endl;
-    string nums;
-    recvMsg(fd, nums);
-    int num = stoi(nums);
-    if (num == 0) {
-        string temp;
-        cout << "你的屏蔽列表为空" << endl;
-        cout << "请按enter返回" << endl;
-        getline(cin, temp);
-        if (cin.eof()) {
-            cout << "读到文件结尾" << endl;
-            return;
-        }
+    nlohmann::json get_req;
+    get_req["flag"] = C2S_GET_BLOCKED_LIST_REQUEST;
+    sendMsg(fd, get_req.dump());
+
+    string response_str;
+    if (recvMsg(fd, response_str) <= 0) {
+        cout << "[错误] 从服务器接收响应失败" << endl;
         return;
     }
-    string blocked_info;
-    User blocked_user;
-    vector<User> blocked_users;
-    for (int i = 0; i < num; i++) {
-        //循环接收屏蔽名单信息
-        recvMsg(fd, blocked_info);
-        blocked_user.json_parse(blocked_info);
-        blocked_users.push_back(blocked_user);
-        cout << i + 1 << ". " << blocked_user.getUsername() << endl;
-    }
-    cout << "请输入你要解除屏蔽的好友序号" << endl;
-    return_last();
-    int who;
-    while (!(cin >> who) || who <= 0 || who > num) {
-        if (cin.eof()) {
-            cout << "读到文件结尾" << endl;
+
+    try {
+        nlohmann::json res = nlohmann::json::parse(response_str);
+        if (res["flag"].get<int>() != S2C_BLOCKED_LIST_RESPONSE || !res["data"]["success"].get<bool>()) {
+            cout << "[错误] 获取屏蔽列表失败: " << res["data"].value("reason", "未知错误") << endl;
             return;
         }
-        if (who == 0)
-        {
+
+        auto blocked_list = res["data"]["blocked_list"];
+        if (blocked_list.empty()) {
+            cout << "\n你的屏蔽列表为空。\n" << endl;
             return;
         }
-        cout << "输入格式错误" << endl;
-        cin.clear();
+
+        vector<User> blocked_users;
+        cout << "\n你的屏蔽列表:" << endl;
+        cout << "======================================" << endl;
+        int i = 1;
+        for (const auto& user_json : blocked_list) {
+            User blocked_user;
+            blocked_user.json_parse(user_json.dump());
+            blocked_users.push_back(blocked_user);
+            cout << i++ << ". " << blocked_user.getUsername() << endl;
+        }
+        cout << "======================================" << endl;
+        cout << "请输入要解除屏蔽的好友序号 (输入0返回): ";
+
+        int who;
+        cin >> who;
         cin.ignore(INT32_MAX, '\n');
+
+        if (who == 0) return;
+        if (who < 1 || who > blocked_users.size()) {
+            cout << "[错误] 无效的序号。" << endl;
+            return;
+        }
+
+        nlohmann::json unblock_req;
+        unblock_req["flag"] = C2S_UNBLOCK_FRIEND_REQUEST;
+        unblock_req["data"]["friend_uid"] = blocked_users[who - 1].getUID();
+        sendMsg(fd, unblock_req.dump());
+
+        string unblock_res_str;
+        if (recvMsg(fd, unblock_res_str) > 0) {
+            auto unblock_res = nlohmann::json::parse(unblock_res_str);
+            cout << "[系统提示] " << unblock_res["data"].value("reason", "") << endl;
+        } else {
+            cout << "[错误] 未收到服务器确认" << endl;
+        }
+
+    } catch (const nlohmann::json::parse_error& e) {
+        cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
     }
-    cin.ignore(INT32_MAX, '\n');
-    //向服务器发送解除屏蔽的UID
-    who--;
-    sendMsg(fd, blocked_users[who].getUID());
-    cout << "你已经成功解除了对" << blocked_users[who].getUsername() << "的屏蔽，请按enter返回" << endl;
-    getline(cin, blocked_info);
-    if (cin.eof()) {
-        cout << "读到文件结尾" << endl;
-        return;
-    }
-} 
+    cout << "======================================\n" << endl;
+}

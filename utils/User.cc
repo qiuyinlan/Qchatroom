@@ -97,34 +97,44 @@ string User::to_json() {
     return root.dump();
 }
 
-void User::json_parse(const string &json_str) {
+void User::json_parse(const nlohmann::json& j) {
     try {
-        json root = json::parse(json_str);
-
+        cout << "[DEBUG] Parsing User from JSON: " << j.dump(2) << endl;
         // 安全地获取字段
-        if (root.contains("my_time") && root["my_time"].is_string()) {
-            my_time = root["my_time"].get<string>();
+        if (j.contains("my_time") && j["my_time"].is_string()) {
+            my_time = j.value("my_time", "");
         }
-        if (root.contains("UID") && root["UID"].is_string()) {
-            UID = root["UID"].get<string>();
+        if (j.contains("UID") && j["UID"].is_string()) {
+            UID = j.value("UID", "");
         }
-        if (root.contains("email") && root["email"].is_string()) {
-            email = root["email"].get<string>();
+        if (j.contains("email") && j["email"].is_string()) {
+            email = j.value("email", "");
         }
-        if (root.contains("username") && root["username"].is_string()) {
-            username = root["username"].get<string>();
+        if (j.contains("username") && j["username"].is_string()) {
+            username = j.value("username", "");
         }
-        if (root.contains("password") && root["password"].is_string()) {
-            password = root["password"].get<string>();
+        if (j.contains("password") && j["password"].is_string()) {
+            password = j.value("password", "");
         }
+        cout << "[DEBUG] Parsed User: UID=" << UID << ", Username=" << username << endl;
     } catch (const std::exception& e) {
         std::cerr << "[ERROR] User JSON解析失败: " << e.what() << std::endl;
-        std::cerr << "[ERROR] JSON内容: " << json_str << std::endl;
+        std::cerr << "[ERROR] JSON内容: " << j.dump() << std::endl;
         // 设置默认值
         my_time = "";
         UID = "";
         email = "";
         username = "未知用户";
         password = "";
+    }
+}
+
+void User::json_parse(const string &json_str) {
+    try {
+        json j = json::parse(json_str);
+        json_parse(j);
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] User JSON字符串解析失败: " << e.what() << std::endl;
+        std::cerr << "[ERROR] JSON内容: " << json_str << std::endl;
     }
 }

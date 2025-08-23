@@ -27,8 +27,9 @@ void G_chat::groupMenu() {
 
 
 void G_chat::groupctrl(vector<pair<string, User>> &my_friends) {
-    sendMsg(fd, GROUP);
     vector<Group> joinedGroup;
+    syncGL(joinedGroup);
+    sendMsg(fd, GROUP);
     vector<Group> managedGroup;
     vector<Group> createdGroup;
     
@@ -91,7 +92,9 @@ G_chat::G_chat(int fd, const User &user) : fd(fd), user(user) {
 void G_chat::syncGL(std::vector<Group> &joinedGroup) {
     joinedGroup.clear();
     // 发送群聊列表获取请求
-    int ret = sendMsg(fd, SYNCGL);
+    nlohmann::json req;
+    req["flag"] = C2S_GET_JOINED_GROUPS_REQUEST;
+    int ret = sendMsg(fd, req.dump());
     if (ret <= 0) {
         cerr << "[ERROR] 发送同步群聊列表请求失败" << endl;
         return;
@@ -263,103 +266,73 @@ void G_chat::sync(vector<Group> &createdGroup, vector<Group> &managedGroup, vect
 
 
 void G_chat::createGroup() {
-    sendMsg(fd, "1");
+    cout << "\n======================================" << endl;
+    cout << "请输入你要创建的群聊名称 (输入0返回): ";
     string groupName;
-     string reply;
-    while (true) {
-        cout << "你要创建的群聊名称是什么" << endl;
-        return_last();
-        getline(cin, groupName);
-        if(groupName.empty()){
-            cout << "群聊名称不能为空" << endl;
-            continue;
-        }
-        if(groupName == "0"){
-            sendMsg(fd,BACK);
-            return;
-        }
-        if (cin.eof()) {
-            cout << "读到文件结尾" << endl;
-            sendMsg(fd,BACK);
-            return;
-        }
-        if (groupName.find(' ') != string::npos) {
-            cout << "群聊名称不能出现空格" << endl;
-            continue;
-        }
-        //发名字
-        sendMsg(fd,groupName);
-        recvMsg(fd,reply);
-        if(reply == "已存在"){
-            cout << "该群名已存在，请重新输入" << endl;
-            continue;
-        }else{
-             break;
-        }
-    }
-   
-    
-    Group group(groupName, user.getUID());
+    getline(cin, groupName);
 
-    sendMsg(fd, group.to_json());
-    cout << "创建成功，可让其他用户搜索群聊名称加入" << endl;
-    string temp;
-    cout << "按enter返回" << endl;
-    getline(cin, temp);
-    if (cin.eof()) {
-        cout << "读到文件结尾" << endl;
+    if (groupName == "0" || groupName.empty()) {
+        cout << "已取消创建群聊。" << endl;
+        cout << "======================================\n" << endl;
         return;
     }
+
+    nlohmann::json req;
+    req["flag"] = C2S_CREATE_GROUP_REQUEST;
+    req["data"]["group_name"] = groupName;
+    sendMsg(fd, req.dump());
+
+    string response_str;
+    if (recvMsg(fd, response_str) > 0) {
+        try {
+            auto res = nlohmann::json::parse(response_str);
+            if (res["flag"].get<int>() == S2C_CREATE_GROUP_RESPONSE) {
+                cout << "[系统提示] " << res["data"].value("reason", "") << endl;
+            } else {
+                cout << "[错误] 收到未知的响应类型" << endl;
+            }
+        } catch (const nlohmann::json::parse_error& e) {
+            cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
+        }
+    } else {
+        cout << "[错误] 未收到服务器确认" << endl;
+    }
+    cout << "======================================\n" << endl;
 }
 
 void G_chat::joinGroup() const {
-   
-    sendMsg(fd, "2");
-    string group_name;
-    while (true) {
-        cout << "输入你要加入的群聊名称" << endl;
-        return_last();
-        getline(cin, group_name);
-        if (cin.eof()) {
-            cout << "文件读到结尾" << endl;
-            sendMsg(fd,BACK);
-            return;
-        }
-        if (group_name == "0") {
-            sendMsg(fd,BACK);
-            return;
-        }   
-        if (group_name.empty()) {
-            cout << "群聊名称不能为空" << endl;
-            continue;
-        }
-        if (group_name.find(' ') != string::npos) {
-            cout << "群聊名称不能包含空格" << endl;
-            continue;
-        }
-        break;
-    }
-    sendMsg(fd, group_name);
-    string response;
+    cout << "\n======================================" << endl;
+    cout << "请输入你要加入的群聊名称 (输入0返回): ";
+    string groupName;
+    getline(cin, groupName);
 
-    recvMsg(fd, response);
-    if (response == "-1") {
-        cout << "该群不存在" << endl;
-    } else if (response == "-2") {
-        cout << "你已经是该群成员" << endl;
-    }else if (response == "-3"){
-        cout << "你已经向该群发送了入群请求,等待同意" << endl;
-    }else{
-        cout << "请求已经发出，等待同意" << endl;
-    }
-    string temp;
-    cout << "按enter返回" << endl;
-    getline(cin, temp);
-    if (cin.eof()) {
-        cout << "读到文件结尾" << endl;
-        sendMsg(fd,BACK);
+    if (groupName == "0" || groupName.empty()) {
+        cout << "已取消加入群聊。" << endl;
+        cout << "======================================\n" << endl;
         return;
     }
+
+    nlohmann::json req;
+    req["flag"] = C2S_JOIN_GROUP_REQUEST;
+    req["data"]["group_name"] = groupName;
+    sendMsg(fd, req.dump());
+
+    string response_str;
+    if (recvMsg(fd, response_str) > 0) {
+        try {
+            auto res = nlohmann::json::parse(response_str);
+            if (res["flag"].get<int>() == S2C_JOIN_GROUP_RESPONSE) {
+                cout << "[系统提示] " << res["data"].value("reason", "") << endl;
+            } else {
+                cout << "[错误] 收到未知的响应类型" << endl;
+            }
+        } catch (const nlohmann::json::parse_error& e) {
+            cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
+        }
+    } else {
+        cout << "[错误] 未收到服务器确认" << endl;
+    }
+    cout << "======================================\n" << endl;
 }
 
 
@@ -380,587 +353,640 @@ void G_chat::ownerMenu() {
 
 
 void G_chat::managed_Group(vector<Group> &managedGroup) const {
+    nlohmann::json req;
+    req["flag"] = C2S_GET_MANAGED_GROUPS_REQUEST;
+    sendMsg(fd, req.dump());
 
-    sendMsg(fd, "3");
-    string temp;
-    if (managedGroup.empty()) {
-        cout << "你当前还没有可以管理的群... 按enter返回" << endl;
-        sendMsg(fd, BACK);
-        getline(cin, temp);
+    string response_str;
+    if (recvMsg(fd, response_str) <= 0) {
+        cout << "[错误] 从服务器获取列表失败" << endl;
         return;
     }
-    cout << "-----------------------------------" << endl;
-    cout << "你管理的群及你的身份" << endl;
-    // 打印群聊列表。群主&&管理权限
-    //引入role,只需要判断，打印role即可，统一形式，不需要额外打印管理和群主
-    for (int i = 0; i < managedGroup.size(); i++) {
-        const Group& group = managedGroup[i];  // 获取当前群聊对象
-        string groupName = group.getGroupName();
-        string role;  // 用于存储身份标识（群主/管理员）
-    
-        if (group.getOwnerUid() == user.getUID()) {
-            role = "(群主)";
-        }
-        else {
-                role = "(管理员)";
-            }
-    
-    
-        // 打印群聊信息（带身份标识）
-        cout << i + 1 << ". " << groupName << role << endl;
-    }
-    
-    
-    
-    cout << "-----------------------------------" << endl;
-    cout << "选择你要管理的群" << endl;
-    return_last();
-    int which;
-    //选择群聊
-    while (!(cin >> which) || which < 0 || which > managedGroup.size()) { //输入失败的时候
-        if (cin.eof()) {
-            //如果退出仍然需要输入，那一定要加clear
-            cin.clear(); 
-            cout << "读到文件结尾" << endl;
+
+    try {
+        auto res = nlohmann::json::parse(response_str);
+        if (res["flag"].get<int>() != S2C_MANAGED_GROUPS_RESPONSE || !res["data"]["success"].get<bool>()) {
+            cout << "[错误] " << res["data"].value("reason", "未知错误") << endl;
             return;
         }
-        cout << "输入格式错误，请输入1-" << managedGroup.size() << "之间的数字" << endl;
-        cin.clear(); //输入失败，需要重置状态
-        cin.ignore(INT32_MAX, '\n');
-    }
-    //输入成功
-    cin.ignore(INT32_MAX, '\n');
-    if (which == 0) {
-        sendMsg(fd, BACK);
-        return;
-    }
-    
-    which--;
 
-    sendMsg(fd, managedGroup[which].to_json());
-    //选择操作
-    //如果是群主
-    if ( managedGroup[which].getOwnerUid() == user.getUID()) {
-        while (true) {
+        auto managed_groups_json = res["data"]["managed_groups"];
+        if (managed_groups_json.empty()) {
+            cout << "\n你当前还没有可以管理的群...\n" << endl;
+            return;
+        }
+
+        vector<Group> local_managed_groups;
+        for (const auto& group_json : managed_groups_json) {
+            Group group;
+            group.json_parse(group_json.dump());
+            local_managed_groups.push_back(group);
+        }
+
+        cout << "\n-----------------------------------" << endl;
+        cout << "你管理的群及你的身份" << endl;
+        for (int i = 0; i < local_managed_groups.size(); i++) {
+            const Group& group = local_managed_groups[i];
+            string role = (group.getOwnerUid() == user.getUID()) ? "(群主)" : "(管理员)";
+            cout << i + 1 << ". " << group.getGroupName() << role << endl;
+        }
+        cout << "-----------------------------------" << endl;
+        cout << "选择你要管理的群 (输入0返回): ";
+
+        int which;
+        cin >> which;
+        cin.ignore(INT32_MAX, '\n');
+
+        if (which == 0) return;
+        if (which < 1 || which > local_managed_groups.size()) {
+            cout << "[错误] 无效的序号。" << endl;
+            return;
+        }
+
+        Group& selected_group = local_managed_groups[which - 1];
+
+        // TODO: 将下面的管理操作也迁移到JSON协议
+        sendMsg(fd, "3"); // 发送旧的管理群组信号，以便服务器进入旧的处理流程
+        sendMsg(fd, selected_group.to_json());
+
+        if (selected_group.getOwnerUid() == user.getUID()) {
             ownerMenu();
             int choice;
-           while (true) {
-                // 先尝试读取整数
-                if (cin >> choice) {
-                    // 如果在允许范围内 → 跳出
-                    if (choice == 0 || choice >0 || choice < 6) {
-                        cin.ignore(INT32_MAX, '\n'); // 清掉这一行剩余的输入
-                        break;
-                    } else {
-                        cout << "输入格式错误" << endl;
-                    }
-                } 
-                else {
-                    // 读取失败
-                    if (cin.eof()) {
-                        cout << "读到文件结尾" << endl;
-                        sendMsg(fd, BACK);
-                        return;
-                    }
-                    cout << "输入格式错误" << endl;
-                    cin.clear(); // 清理 fail 状态
-                }
-
-                // 无论是范围错误还是解析失败，都清掉剩余输入
-                cin.ignore(INT32_MAX, '\n');
-            }
-
-            if (choice == 0) {
-                sendMsg(fd, BACK);
-                break;
-            } else if (choice == 1) {
-                approve();
-                break;
-            } else if (choice == 2) {
-                remove(managedGroup[which]);
-                break;
-            } else if (choice == 3) {
-                appointAdmin(managedGroup[which]);
-                break;
-            } else if (choice == 4) {
-                revokeAdmin(managedGroup[which]);
-                break;
-            } else if (choice == 5) {
-                deleteGroup(managedGroup[which]);
-                break;
-            } 
-            
-        }
-    }
-    else {
-        while (true) {
+            cin >> choice;
+            cin.ignore(INT32_MAX, '\n');
+            if (choice == 0) { sendMsg(fd, BACK); return; }
+                        if (choice == 1) approve(selected_group);
+            else if (choice == 2) remove(selected_group);
+            else if (choice == 3) appointAdmin(selected_group);
+            else if (choice == 4) revokeAdmin(selected_group);
+            else if (choice == 5) deleteGroup(selected_group);
+        } else {
             managedMenu();
             int choice;
-            while (true) { // 先尝试读取整数
-                if (cin >> choice) {
-                    // 如果在允许范围内 → 跳出
-                    if (choice == 0 || choice == 1 || choice == 2) {
-                        cin.ignore(INT32_MAX, '\n'); // 清掉这一行剩余的输入
-                        break;
-                    } else {
-                        cout << "输入格式错误" << endl;
-                    }
-                } 
-                else {
-                    // 读取失败
-                    if (cin.eof()) {
-                        cout << "读到文件结尾" << endl;
-                        sendMsg(fd, BACK);
-                        return;
-                    }
-                    cout << "输入格式错误" << endl;
-                    cin.clear(); // 清理 fail 状态
-                }
-
-                // 无论是范围错误还是解析失败，都清掉剩余输入
-                cin.ignore(INT32_MAX, '\n');
-            }
-
-            if (choice == 0) {
-    
-                sendMsg(fd, BACK);
-                break;
-            }
-            if (choice == 1) {
-                approve();
-                break;
-            } else if (choice == 2) {
-                remove(managedGroup[which]);
-                break;
-            }
-    
+            cin >> choice;
+            cin.ignore(INT32_MAX, '\n');
+            if (choice == 0) { sendMsg(fd, BACK); return; }
+                        if (choice == 1) approve(selected_group);
+            else if (choice == 2) remove(selected_group);
         }
+
+    } catch (const nlohmann::json::parse_error& e) {
+        cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
     }
-    
 }
 
-void G_chat::approve() const {
-    sendMsg(fd, "1");
-    string nums;
+void G_chat::approve(const Group& group) const {
+    nlohmann::json get_req;
+    get_req["flag"] = C2S_GET_GROUP_JOIN_REQUESTS;
+    get_req["data"]["group_uid"] = group.getGroupUid();
+    sendMsg(fd, get_req.dump());
 
-    recvMsg(fd, nums);
-    int num = stoi(nums);
-    if (num == 0) {
-        cout << "暂无入群申请" << endl;
+    string response_str;
+    if (recvMsg(fd, response_str) <= 0) {
+        cout << "[错误] 从服务器获取列表失败" << endl;
         return;
     }
-    string buf;
-    for (int i = 0; i < num; i++) {
 
-        recvMsg(fd, buf);
-        cout << "收到" << buf << "的入群申请" << endl;
-        cout << "[y]YES,[n]NO" << endl;
-        string choice;
-        while (!(cin >> choice) || (choice != "y" && choice != "n")) {
-            cout << "输入格式错误，请输入y或n" << endl;
-            cin.clear();
+    try {
+        auto res = nlohmann::json::parse(response_str);
+        if (res["flag"].get<int>() != S2C_GROUP_JOIN_REQUESTS_RESPONSE || !res["data"]["success"].get<bool>()) {
+            cout << "[错误] 获取申请列表失败: " << res["data"].value("reason", "未知错误") << endl;
+            return;
         }
 
-        sendMsg(fd, choice);
-        if (choice == "y") {
-            cout << "添加成功" << endl;
-        } else {
-            cout << "添加失败" << endl;
+        auto requests = res["data"]["requests"];
+        if (requests.empty()) {
+            cout << "\n该群聊暂无新的入群申请。\n" << endl;
+            return;
         }
-    }
-    cout << "按enter返回" << endl;
-    getline(cin, buf);
-    if (cin.eof()) {
-        cout << "读到文件结尾" << endl;
-        return;
+
+        cout << "\n收到 " << requests.size() << " 条入群申请:" << endl;
+        cout << "======================================" << endl;
+
+        for (const auto& req_user_json : requests) {
+            User requester;
+            requester.json_parse(req_user_json.dump());
+
+            cout << "收到来自 " << requester.getUsername() << " (UID: " << requester.getUID() << ") 的入群申请。" << endl;
+            cout << "请选择: [1]同意 [2]拒绝 [3]忽略" << endl;
+
+            int choice;
+            cin >> choice;
+            cin.ignore(INT32_MAX, '\n');
+
+            if (choice == 3) continue;
+
+            if (choice == 1 || choice == 2) {
+                nlohmann::json respond_req;
+                respond_req["flag"] = C2S_RESPOND_TO_GROUP_JOIN_REQUEST;
+                respond_req["data"]["group_uid"] = group.getGroupUid();
+                respond_req["data"]["requester_uid"] = requester.getUID();
+                respond_req["data"]["accepted"] = (choice == 1);
+                sendMsg(fd, respond_req.dump());
+
+                string respond_res_str;
+                if (recvMsg(fd, respond_res_str) > 0) {
+                    auto respond_res = nlohmann::json::parse(respond_res_str);
+                    cout << "[系统提示] " << respond_res["data"].value("reason", "") << endl;
+                } else {
+                    cout << "[错误] 未收到服务器确认" << endl;
+                }
+            }
+        }
+        cout << "======================================\n" << endl;
+
+    } catch (const nlohmann::json::parse_error& e) {
+        cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
     }
 }
 
 void G_chat::remove(Group &group) const {
-    sendMsg(fd, "2");
-    string buf;
-    User member;
-    vector<User> arr;
-    //接收服务器发送的群员数量
-    recvMsg(fd, buf);
-    int num = stoi(buf);
+    nlohmann::json get_req;
+    get_req["flag"] = C2S_GET_GROUP_MEMBERS_REQUEST;
+    get_req["data"]["group_uid"] = group.getGroupUid();
+    sendMsg(fd, get_req.dump());
 
-    cout << YELLOW<< "-----------------------------------" << RESET << endl;
-    for (int i = 0; i < num; i++) {
-        //接收服务器发送的群员信息
-        recvMsg(fd, buf);
-        member.json_parse(buf);
-        arr.push_back(member);
-        if (member.getUID() == group.getOwnerUid()) {
-            cout << i + 1 << "." << member.getUsername() << "(群主)" << endl;
-        } else {
-            cout << i + 1 << "." << member.getUsername() << endl;
-        }
+    string response_str;
+    if (recvMsg(fd, response_str) <= 0) {
+        cout << "[错误] 从服务器获取成员列表失败" << endl;
+        return;
     }
 
-    cout << YELLOW<< "-----------------------------------" << RESET << endl;
-    cout << "tip:不能踢群主和自己哦" << endl;
+    try {
+        auto res = nlohmann::json::parse(response_str);
+        if (res["flag"].get<int>() != S2C_GROUP_MEMBERS_RESPONSE || !res["data"]["success"].get<bool>()) {
+            cout << "[错误] " << res["data"].value("reason", "未知错误") << endl;
+            return;
+        }
 
+        auto members_json = res["data"]["members"];
+        if (members_json.empty()) {
+            cout << "\n群聊中没有其他成员。\n" << endl;
+            return;
+        }
 
-    while (true) {
-        cout << "你要踢谁" << endl;
-        return_last();
+        vector<User> members;
+        cout << "\n-----------------------------------" << endl;
+        cout << "群成员列表:" << endl;
+        int i = 1;
+        for (const auto& member_json : members_json) {
+            User member;
+            member.json_parse(member_json.dump());
+            members.push_back(member);
+            string role = (member.getUID() == group.getOwnerUid()) ? "(群主)" : "";
+            cout << i++ << ". " << member.getUsername() << role << endl;
+        }
+        cout << "-----------------------------------" << endl;
+        cout << "请输入要踢出的成员序号 (输入0返回): ";
+
         int who;
-        while (!(cin >> who) || who < 0 || who > (int)arr.size()) {
-            if (cin.eof()) {
-                cout << "读到文件结尾" << endl;
-                return;
-            }
-            cout << "输入格式错误，请输入0-" << arr.size() << "之间的数字" << endl;
-            cin.clear();
-            cin.ignore(INT32_MAX, '\n');
-        }
+        cin >> who;
         cin.ignore(INT32_MAX, '\n');
-        if (who == 0) {
-            sendMsg(fd, "0");
+
+        if (who == 0) return;
+        if (who < 1 || who > members.size()) {
+            cout << "[错误] 无效的序号。" << endl;
             return;
         }
-        who--;
-        if (arr[who].getUID() == group.getOwnerUid()) {
-            cout << "该用户是群主，你不能踢！" << endl;
-            continue;
-        }
-        if (arr[who].getUID() == user.getUID()) {
-            cout << "你不能踢自己哦" << endl;
-            continue;
-        }
-        sendMsg(fd, arr[who].to_json());
 
-        cout << "删除成功，按enter返回" << endl;
-        getline(cin, buf);
-        if (cin.eof()) {
-            cout << "读到文件结尾" << endl;
+        User& to_kick = members[who - 1];
+
+        if (to_kick.getUID() == group.getOwnerUid()) {
+            cout << "[错误] 不能踢出群主。" << endl;
             return;
         }
-        break;
-    }
-}
+        if (to_kick.getUID() == user.getUID()) {
+            cout << "[错误] 不能踢出自己。" << endl;
+            return;
+        }
 
+        nlohmann::json kick_req;
+        kick_req["flag"] = C2S_KICK_GROUP_MEMBER_REQUEST;
+        kick_req["data"]["group_uid"] = group.getGroupUid();
+        kick_req["data"]["kick_uid"] = to_kick.getUID();
+        sendMsg(fd, kick_req.dump());
 
-void G_chat::appointAdmin(Group &createdGroup) const {
-    sendMsg(fd, "3");
-    vector<User> arr;
-    string nums;
-    User member;
-
-    recvMsg(fd, nums);
-    int num = stoi(nums);
-    string member_info;
-
-    cout << YELLOW << "-----------------------------------" << RESET << endl;
-    for (int i = 0; i < num; i++) {
-
-        recvMsg(fd, member_info);
-        member.json_parse(member_info);
-        arr.push_back(member);
-        if (member.getUID() == createdGroup.getOwnerUid()) {
-            cout << i + 1 << ". " << member.getUsername() << "群主" << endl;
+        string kick_res_str;
+        if (recvMsg(fd, kick_res_str) > 0) {
+            auto kick_res = nlohmann::json::parse(kick_res_str);
+            cout << "[系统提示] " << kick_res["data"].value("reason", "") << endl;
         } else {
-            cout << i + 1 << ". " << member.getUsername() << endl;
+            cout << "[错误] 未收到服务器确认" << endl;
         }
-    }
 
-    cout << YELLOW << "-----------------------------------" << RESET << endl;
-    int who;
-    while (true) {
-        cout << "你要任命谁为管理员" << endl;
-        while (!(cin >> who) || who < 0 || who > arr.size()) {
-            if (cin.eof()) {
-                cout << "读到文件结尾" << endl;
-                return;
-            }
-            cin.clear();
-            cin.ignore(INT32_MAX, '\n');
-        }
-        cin.ignore(INT32_MAX, '\n');
-        who--;
-        if (arr[who].getUID() == createdGroup.getOwnerUid()) {
-            cout << "该用户为群主" << endl;
-            continue;
-        }
-        break;
+    } catch (const nlohmann::json::parse_error& e) {
+        cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
     }
-
-    sendMsg(fd, arr[who].to_json());
-    string reply;
-
-    recvMsg(fd, reply);
-    if (reply == "-1") {
-        cout << "该用户为管理员，无法多次设置" << endl;
-        return;
-    }
-    cout << "按enter返回" << endl;
-    string temp;
-    getline(cin, temp);
-    if (cin.eof()) {
-        cout << "读到文件结尾" << endl;
-        return;
-    }
+    cout << "======================================\n" << endl;
 }
 
-void G_chat::revokeAdmin(Group &createdGroup) const {
-    sendMsg(fd, "4");
-    string nums;
 
-    recvMsg(fd, nums);
-    int num = stoi(nums);
-    string admin_info;
-    User admin;
-    vector<User> arr;
-    for (int i = 0; i < num; i++) {
+void G_chat::appointAdmin(Group &group) const {
+    nlohmann::json get_req;
+    get_req["flag"] = C2S_GET_GROUP_MEMBERS_REQUEST;
+    get_req["data"]["group_uid"] = group.getGroupUid();
+    sendMsg(fd, get_req.dump());
 
-        recvMsg(fd, admin_info);
-        admin.json_parse(admin_info);
-        arr.push_back(admin);
-        if (admin.getUID() == createdGroup.getOwnerUid()) {
-            cout << i + 1 << "." << admin.getUsername() << "(群主)" << endl;
-        } else {
-            cout << i + 1 << "." << admin.getUsername() << endl;
-        }
-    }
-    int who;
-    while (true) {
-        cout << "选择你要取消的人,tip：不能取消群主你自己的管理权限哦" << endl;
-        while (!(cin >> who) || who < 0 || who > arr.size()) {
-            if (cin.eof()) {
-                cout << "读到文件结尾" << endl;
-                return;
-            }
-            cin.clear();
-            cin.ignore(INT32_MAX, '\n');
-        }
-        cin.ignore(INT32_MAX, '\n');
-        who--;
-        if (arr[who].getUID() == createdGroup.getOwnerUid()) {
-            cout << "不能取消群主的管理权限" << endl;
-            continue;
-        }
-        break;
-    }
-
-    sendMsg(fd, arr[who].to_json());
-    cout << "撤销成功，按enter返回" << endl;
-    string temp;
-    getline(cin, temp);
-    if (cin.eof()) {
-        cout << "读到文件结尾" << endl;
+    string response_str;
+    if (recvMsg(fd, response_str) <= 0) {
+        cout << "[错误] 从服务器获取成员列表失败" << endl;
         return;
     }
-}
 
-void G_chat::deleteGroup(Group &createdGroup) const {
-    sendMsg(fd, "5");
-    cout << "解散成功，按enter返回" << endl;
-    string temp;
-    getline(cin, temp);
-    if (cin.eof()) {
-        cout << "读到文件结尾" << endl;
-        return;
-    }
-}
-
-void G_chat::showMembers(std::vector<Group> &group) {
-    sendMsg(fd, "4");
-    //传入的是加入的群的数组——joinedgroup
-    string temp;
-    if (group.empty()) {
-        cout << "你当前还没有加入任何群聊... 按enter返回" << endl;
-        sendMsg(fd,BACK);
-        getline(cin, temp);
-        return;
-    }
-    cout << user.getUsername() << endl;
-    cout << "--------------------------" << endl;
-    for (int i = 0; i < group.size(); i++) {
-        cout << i + 1 << ". " << group[i].getGroupName() << endl;
-    }
-    cout << "--------------------------" << endl;
-    cout << "你要查看哪个群" << endl;
-    return_last();
-    int which;
-    while (!(cin >> which) || which < 0 || which > group.size()) {
-        if (cin.eof()) {
-            cout << "读到文件结尾" << endl;
+    try {
+        auto res = nlohmann::json::parse(response_str);
+        if (res["flag"].get<int>() != S2C_GROUP_MEMBERS_RESPONSE || !res["data"]["success"].get<bool>()) {
+            cout << "[错误] " << res["data"].value("reason", "未知错误") << endl;
             return;
         }
-        cout << "输入格式错误" << endl;
-        cin.clear();
+
+        auto members_json = res["data"]["members"];
+        vector<User> non_admins;
+        for (const auto& member_json : members_json) {
+            User member;
+            member.json_parse(member_json.dump());
+            // 客户端可以预先过滤掉已经是管理员或群主的成员
+            // 这里为了演示，假设服务器会做最终校验，显示所有非群主成员
+            if (member.getUID() != group.getOwnerUid()) {
+                non_admins.push_back(member);
+            }
+        }
+
+        if (non_admins.empty()) {
+            cout << "\n没有可以任命为管理员的成员。\n" << endl;
+            return;
+        }
+
+        cout << "\n-----------------------------------" << endl;
+        cout << "选择要任命为管理员的成员:" << endl;
+        for (int i = 0; i < non_admins.size(); ++i) {
+            cout << i + 1 << ". " << non_admins[i].getUsername() << endl;
+        }
+        cout << "-----------------------------------" << endl;
+        cout << "请输入序号 (输入0返回): ";
+
+        int who;
+        cin >> who;
         cin.ignore(INT32_MAX, '\n');
+
+        if (who == 0) return;
+        if (who < 1 || who > non_admins.size()) {
+            cout << "[错误] 无效的序号。" << endl;
+            return;
+        }
+
+        nlohmann::json appoint_req;
+        appoint_req["flag"] = C2S_APPOINT_ADMIN_REQUEST;
+        appoint_req["data"]["group_uid"] = group.getGroupUid();
+        appoint_req["data"]["appoint_uid"] = non_admins[who - 1].getUID();
+        sendMsg(fd, appoint_req.dump());
+
+        string appoint_res_str;
+        if (recvMsg(fd, appoint_res_str) > 0) {
+            auto appoint_res = nlohmann::json::parse(appoint_res_str);
+            cout << "[系统提示] " << appoint_res["data"].value("reason", "") << endl;
+        } else {
+            cout << "[错误] 未收到服务器确认" << endl;
+        }
+
+    } catch (const nlohmann::json::parse_error& e) {
+        cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
     }
-    cin.ignore(INT32_MAX, '\n');
+    cout << "======================================\n" << endl;
+}
 
-    if (which == 0) {
-        sendMsg(fd, BACK);
-        return;  // 用户选择退出
-    }
-    which--;
-    cout << "-------------------------------------------" << endl;
-    cout << "群聊名称：" << group[which].getGroupName() << endl;
-    cout << "【成员列表】" << endl;
+void G_chat::revokeAdmin(Group &group) const {
+    nlohmann::json get_req;
+    get_req["flag"] = C2S_GET_GROUP_ADMINS_REQUEST;
+    get_req["data"]["group_uid"] = group.getGroupUid();
+    sendMsg(fd, get_req.dump());
 
-    sendMsg(fd, group[which].to_json());
-    string nums;
-
-    //收
-    recvMsg(fd, nums);
-    int num = stoi(nums);
-    string member_info;
-    for (int i = 0; i < num; i++) {
-
-        recvMsg(fd, member_info);
-        cout << i + 1 << ". " << member_info << endl;
-    }
-    cout << "-------------------------------------------" << endl;
-    cout << "按enter返回" << endl;
-    if (cin.eof()) {
-        cout << "读到文件结尾" << endl;
+    string response_str;
+    if (recvMsg(fd, response_str) <= 0) {
+        cout << "[错误] 从服务器获取管理员列表失败" << endl;
         return;
+    }
+
+    try {
+        auto res = nlohmann::json::parse(response_str);
+        if (res["flag"].get<int>() != S2C_GROUP_ADMINS_RESPONSE || !res["data"]["success"].get<bool>()) {
+            cout << "[错误] " << res["data"].value("reason", "未知错误") << endl;
+            return;
+        }
+
+        auto admins_json = res["data"]["admins"];
+        vector<User> revocable_admins;
+        for (const auto& admin_json : admins_json) {
+            User admin;
+            admin.json_parse(admin_json.dump());
+            if (admin.getUID() != group.getOwnerUid()) {
+                revocable_admins.push_back(admin);
+            }
+        }
+
+        if (revocable_admins.empty()) {
+            cout << "\n没有可以撤销的管理员。\n" << endl;
+            return;
+        }
+
+        cout << "\n-----------------------------------" << endl;
+        cout << "选择要撤销的管理员:" << endl;
+        for (int i = 0; i < revocable_admins.size(); ++i) {
+            cout << i + 1 << ". " << revocable_admins[i].getUsername() << endl;
+        }
+        cout << "-----------------------------------" << endl;
+        cout << "请输入序号 (输入0返回): ";
+
+        int who;
+        cin >> who;
+        cin.ignore(INT32_MAX, '\n');
+
+        if (who == 0) return;
+        if (who < 1 || who > revocable_admins.size()) {
+            cout << "[错误] 无效的序号。" << endl;
+            return;
+        }
+
+        nlohmann::json revoke_req;
+        revoke_req["flag"] = C2S_REVOKE_ADMIN_REQUEST;
+        revoke_req["data"]["group_uid"] = group.getGroupUid();
+        revoke_req["data"]["revoke_uid"] = revocable_admins[who - 1].getUID();
+        sendMsg(fd, revoke_req.dump());
+
+        string revoke_res_str;
+        if (recvMsg(fd, revoke_res_str) > 0) {
+            auto revoke_res = nlohmann::json::parse(revoke_res_str);
+            cout << "[系统提示] " << revoke_res["data"].value("reason", "") << endl;
+        } else {
+            cout << "[错误] 未收到服务器确认" << endl;
+        }
+
+    } catch (const nlohmann::json::parse_error& e) {
+        cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
+    }
+    cout << "======================================\n" << endl;
+}
+
+void G_chat::deleteGroup(Group &group) const {
+    cout << "\n警告：解散群聊将永久删除所有群成员和聊天记录。" << endl;
+    cout << "此操作无法撤销。您确定要继续吗？ (输入 'yes' 以确认): ";
+    string confirmation;
+    getline(cin, confirmation);
+
+    if (confirmation != "yes") {
+        cout << "已取消解散群聊操作。" << endl;
+        return;
+    }
+
+    nlohmann::json req;
+    req["flag"] = C2S_DELETE_GROUP_REQUEST;
+    req["data"]["group_uid"] = group.getGroupUid();
+    sendMsg(fd, req.dump());
+
+    string response_str;
+    if (recvMsg(fd, response_str) > 0) {
+        try {
+            auto res = nlohmann::json::parse(response_str);
+            cout << "[系统提示] " << res["data"].value("reason", "") << endl;
+        } catch (const nlohmann::json::parse_error& e) {
+            cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
+        }
+    } else {
+        cout << "[错误] 未收到服务器确认" << endl;
+    }
+    cout << "======================================\n" << endl;
+}
+
+void G_chat::showMembers(std::vector<Group> &joinedGroup) {
+    nlohmann::json get_groups_req;
+    get_groups_req["flag"] = C2S_GET_JOINED_GROUPS_REQUEST;
+    sendMsg(fd, get_groups_req.dump());
+
+    string groups_res_str;
+    if (recvMsg(fd, groups_res_str) <= 0) {
+        cout << "[错误] 从服务器获取群聊列表失败" << endl;
+        return;
+    }
+
+    try {
+        auto groups_res = nlohmann::json::parse(groups_res_str);
+        if (groups_res["flag"].get<int>() != S2C_JOINED_GROUPS_RESPONSE || !groups_res["data"]["success"].get<bool>()) {
+            cout << "[错误] " << groups_res["data"].value("reason", "未知错误") << endl;
+            return;
+        }
+
+        auto joined_groups_json = groups_res["data"]["joined_groups"];
+        if (joined_groups_json.empty()) {
+            cout << "\n你当前还没有加入任何群聊...\n" << endl;
+            return;
+        }
+
+        vector<Group> local_joined_groups;
+        for (const auto& group_json : joined_groups_json) {
+            Group group;
+            group.json_parse(group_json.dump());
+            local_joined_groups.push_back(group);
+        }
+
+        cout << "\n--------------------------" << endl;
+        for (int i = 0; i < local_joined_groups.size(); i++) {
+            cout << i + 1 << ". " << local_joined_groups[i].getGroupName() << endl;
+        }
+        cout << "--------------------------" << endl;
+        cout << "你要查看哪个群 (输入0返回): ";
+
+        int which;
+        cin >> which;
+        cin.ignore(INT32_MAX, '\n');
+
+        if (which == 0) return;
+        if (which < 1 || which > local_joined_groups.size()) {
+            cout << "[错误] 无效的序号。" << endl;
+            return;
+        }
+
+        Group& selected_group = local_joined_groups[which - 1];
+
+        nlohmann::json get_members_req;
+        get_members_req["flag"] = C2S_GET_GROUP_MEMBERS_REQUEST;
+        get_members_req["data"]["group_uid"] = selected_group.getGroupUid();
+        sendMsg(fd, get_members_req.dump());
+
+        string members_res_str;
+        if (recvMsg(fd, members_res_str) <= 0) {
+            cout << "[错误] 从服务器获取成员列表失败" << endl;
+            return;
+        }
+
+        auto members_res = nlohmann::json::parse(members_res_str);
+        if (members_res["flag"].get<int>() != S2C_GROUP_MEMBERS_RESPONSE || !members_res["data"]["success"].get<bool>()) {
+            cout << "[错误] " << members_res["data"].value("reason", "未知错误") << endl;
+            return;
+        }
+
+        cout << "\n-----------------------------------" << endl;
+        cout << "群聊名称: " << selected_group.getGroupName() << endl;
+        cout << "【成员列表】" << endl;
+        auto members_json = members_res["data"]["members"];
+        int i = 1;
+        for (const auto& member_json : members_json) {
+            User member;
+            member.json_parse(member_json.dump());
+            cout << i++ << ". " << member.getUsername() << endl;
+        }
+        cout << "-----------------------------------\n" << endl;
+
+    } catch (const nlohmann::json::parse_error& e) {
+        cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
     }
 }
 
 void G_chat::quit(vector<Group> &joinedGroup) {
+    nlohmann::json get_groups_req;
+    get_groups_req["flag"] = C2S_GET_JOINED_GROUPS_REQUEST;
+    sendMsg(fd, get_groups_req.dump());
 
-    sendMsg(fd, "5");
-    string temp;
-    if (joinedGroup.empty()) {
-        cout << "你当前没有加入任何群聊" << endl;
-        cout << "按enter返回" << endl;
-        getline(cin, temp);
-        if (cin.eof()) {
+    string groups_res_str;
+    if (recvMsg(fd, groups_res_str) <= 0) {
+        cout << "[错误] 从服务器获取群聊列表失败" << endl;
+        return;
+    }
+
+    try {
+        auto groups_res = nlohmann::json::parse(groups_res_str);
+        if (groups_res["flag"].get<int>() != S2C_JOINED_GROUPS_RESPONSE || !groups_res["data"]["success"].get<bool>()) {
+            cout << "[错误] " << groups_res["data"].value("reason", "未知错误") << endl;
             return;
         }
-        return;
-    }
-    cout << "-------------------------------------------" << endl;
-    cout << "你加入的群及你的身份" << endl;
-    for (int i = 0; i < joinedGroup.size(); i++) {
-        if (joinedGroup[i].getOwnerUid() == user.getUID()) {
-            cout << i + 1 << ". " << joinedGroup[i].getGroupName() << "(群主)" << endl;
-        } else {
-            cout << i + 1 << ". " << joinedGroup[i].getGroupName() << endl;
-        }
-    }
-    cout << "-------------------------------------------" << endl;
-    int which;
-    while (true) {
-        cout << "tip:群主不能退出群聊哦" << endl;
-        cout << "输入你要退出的群" << endl;
-        return_last();
-        while (!(cin >> which) || which < 0 || which > joinedGroup.size()) {
-            if (cin.eof()) {
-                cout << "读到文件结尾" << endl;
-                return;
-            }
-            cout << "输入格式错误" << endl;
-            cin.clear();
-            cin.ignore(INT32_MAX, '\n');
-        }
-        if (which == 0) {
-            sendMsg(fd,BACK);
-            return;  // 用户选择退出
-        }
-        cin.ignore(INT32_MAX, '\n');
-        which--;
-        if (joinedGroup[which].getOwnerUid() == user.getUID()) {
-            cout << "你是该群群主，不能退出" << endl;
-            continue;
-        }
-        break;
-    }
 
-    sendMsg(fd, joinedGroup[which].to_json());
-    cout << "你已退出该群，按enter返回" << endl;
-    getline(cin, temp);
-    if (cin.eof()) {
-        cout << "读到文件结尾" << endl;
-        return;
+        auto joined_groups_json = groups_res["data"]["joined_groups"];
+        if (joined_groups_json.empty()) {
+            cout << "\n你当前还没有加入任何群聊...\n" << endl;
+            return;
+        }
+
+        vector<Group> local_joined_groups;
+        cout << "\n-------------------------------------------" << endl;
+        cout << "你加入的群及你的身份" << endl;
+        int i = 1;
+        for (const auto& group_json : joined_groups_json) {
+            Group group;
+            group.json_parse(group_json.dump());
+            local_joined_groups.push_back(group);
+            string role = (group.getOwnerUid() == user.getUID()) ? "(群主)" : "";
+            cout << i++ << ". " << group.getGroupName() << role << endl;
+        }
+        cout << "-------------------------------------------" << endl;
+        cout << "输入你要退出的群 (输入0返回): ";
+
+        int which;
+        cin >> which;
+        cin.ignore(INT32_MAX, '\n');
+
+        if (which == 0) return;
+        if (which < 1 || which > local_joined_groups.size()) {
+            cout << "[错误] 无效的序号。" << endl;
+            return;
+        }
+
+        Group& selected_group = local_joined_groups[which - 1];
+
+        if (selected_group.getOwnerUid() == user.getUID()) {
+            cout << "[错误] 你是该群群主，不能退出，请在管理群聊中解散该群。" << endl;
+            return;
+        }
+
+        nlohmann::json quit_req;
+        quit_req["flag"] = C2S_QUIT_GROUP_REQUEST;
+        quit_req["data"]["group_uid"] = selected_group.getGroupUid();
+        sendMsg(fd, quit_req.dump());
+
+        string quit_res_str;
+        if (recvMsg(fd, quit_res_str) > 0) {
+            auto quit_res = nlohmann::json::parse(quit_res_str);
+            cout << "[系统提示] " << quit_res["data"].value("reason", "") << endl;
+        } else {
+            cout << "[错误] 未收到服务器确认" << endl;
+        }
+
+    } catch (const nlohmann::json::parse_error& e) {
+        cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
     }
+    cout << "======================================\n" << endl;
 }
 
  void G_chat::getperson(vector<Group> &group){
-    //传入的是加入的群的数组——joinedgroup
+    nlohmann::json get_groups_req;
+    get_groups_req["flag"] = C2S_GET_JOINED_GROUPS_REQUEST;
+    sendMsg(fd, get_groups_req.dump());
 
-    sendMsg(fd,"6");
-    sendMsg(fd,user.getUID());
-    
-    
-    string temp;
-    if (group.empty()) {
-        cout << "你当前还没有加入任何群聊... 按enter返回" << endl;
-        sendMsg(fd,"0");
-        getline(cin, temp);
+    string groups_res_str;
+    if (recvMsg(fd, groups_res_str) <= 0) {
+        cout << "[错误] 从服务器获取群聊列表失败" << endl;
         return;
     }
-    cout << user.getUsername() << endl;
-    cout << "--------------------------" << endl;
-    for (int i = 0; i < group.size(); i++) {
-        cout << i + 1 << ". " << group[i].getGroupName() << endl;
-    }
-    cout << "--------------------------" << endl;
-    cout << "你要向哪个群拉入你的好友" << endl;
-    return_last();
-    int which;
-    while (!(cin >> which) || which < 0 || which > group.size()) {
-        if (cin.eof()) {
-            cout << "读到文件结尾" << endl;
+
+    try {
+        auto groups_res = nlohmann::json::parse(groups_res_str);
+        if (groups_res["flag"].get<int>() != S2C_JOINED_GROUPS_RESPONSE || !groups_res["data"]["success"].get<bool>()) {
+            cout << "[错误] " << groups_res["data"].value("reason", "未知错误") << endl;
             return;
         }
-        cout << "输入格式错误" << endl;
-        cin.clear();
+
+        auto joined_groups_json = groups_res["data"]["joined_groups"];
+        if (joined_groups_json.empty()) {
+            cout << "\n你当前还没有加入任何群聊...\n" << endl;
+            return;
+        }
+
+        vector<Group> local_joined_groups;
+        cout << "\n--------------------------" << endl;
+        for (int i = 0; i < joined_groups_json.size(); i++) {
+            Group group_item;
+            group_item.json_parse(joined_groups_json[i].dump());
+            local_joined_groups.push_back(group_item);
+            cout << i + 1 << ". " << group_item.getGroupName() << endl;
+        }
+        cout << "--------------------------" << endl;
+        cout << "你要向哪个群拉入你的好友 (输入0返回): ";
+
+        int which;
+        cin >> which;
         cin.ignore(INT32_MAX, '\n');
-    }
-    cin.ignore(INT32_MAX, '\n');
 
-    if (which == 0) {
-        sendMsg(fd, "0");
-        return;  // 用户选择退出
-    }
-    which--;
-    cout << "-------------------------------------------" << endl;
-    cout << "群聊名称：" << group[which].getGroupName() << endl;
-
-    sendMsg(fd,group[which].to_json());
-
-    ////////////////////////////////////
-    
-    string name,reply;
-    while(true) {
-         cout << "请输入你要拉入群聊的好友名字" << endl;
-        return_last();
-        getline(cin, name);
-        if (name == "0") {
-            sendMsg(fd,name);
+        if (which == 0) return;
+        if (which < 1 || which > local_joined_groups.size()) {
+            cout << "[错误] 无效的序号。" << endl;
             return;
         }
-        sendMsg(fd,name);
-        recvMsg(fd,reply);
-        
-        if (reply == "-1") {
-            cout << RED <<"TA不是你的好友（你们可能没加好友或者你默默被他（她）删除了）" << RESET << endl;
-            continue;
+
+        Group& selected_group = local_joined_groups[which - 1];
+
+        cout << "请输入你要拉入群聊的好友名字 (输入0返回): ";
+        string friend_username;
+        getline(cin, friend_username);
+
+        if (friend_username == "0" || friend_username.empty()) {
+            cout << "已取消邀请。" << endl;
+            return;
         }
-        else if (reply == "-3") {
-            cout << RED <<"该好友已注销，不能拉入群聊" << RESET << endl;
-            continue;
+
+        nlohmann::json invite_req;
+        invite_req["flag"] = C2S_INVITE_TO_GROUP_REQUEST;
+        invite_req["data"]["group_uid"] = selected_group.getGroupUid();
+        invite_req["data"]["friend_username"] = friend_username;
+        sendMsg(fd, invite_req.dump());
+
+        string invite_res_str;
+        if (recvMsg(fd, invite_res_str) > 0) {
+            auto invite_res = nlohmann::json::parse(invite_res_str);
+            cout << "[系统提示] " << invite_res["data"].value("reason", "") << endl;
+        } else {
+            cout << "[错误] 未收到服务器确认" << endl;
         }
-        else if (reply == "-2") {
-            cout << RED <<"该好友已经在群聊中，不能重复添加" << RESET << endl;
-            continue;
-        }
-        else if (reply == "-4") {
-            cout << RED <<"不能拉自己" << RESET << endl;
-            continue;
-        }
-        else if (reply == "1") {
-            break;
-        }
+
+    } catch (const nlohmann::json::parse_error& e) {
+        cout << "[错误] 解析服务器响应失败: " << e.what() << endl;
     }
-        cout << GREEN << "添加成功" << RESET << endl;
-        cout << "按enter返回" << endl;
-        getline(cin, temp);
+    cout << "======================================\n" << endl;
 }

@@ -3,6 +3,7 @@
 #define CHATROOM_USER_H
 
 #include <string>
+#include "nlohmann/json.hpp"
 //CMakeLists.txt中没有在client.out中加上User.cc, 导致编译client的时候链接错误
 using std::string;
 
@@ -38,7 +39,8 @@ public:
     string to_json();
 
     
-    void json_parse(const string &json);
+    void json_parse(const string &json_str);
+    void json_parse(const nlohmann::json& j);
 
 private:
     string UID;    //由注册时间关联，10位

@@ -1,0 +1,4 @@
+/home/xuzichun/111111chatroom/messengertest/CMakeFiles/server.out.dir
+/home/xuzichun/111111chatroom/messengertest/CMakeFiles/client.out.dir
+/home/xuzichun/111111chatroom/messengertest/CMakeFiles/edit_cache.dir
+/home/xuzichun/111111chatroom/messengertest/CMakeFiles/rebuild_cache.dir

@@ -56,12 +56,14 @@ void get_password(const string& prompt, string &password) {
 }
 
 int login(int fd, User &user) {
-    sendMsg(fd, LOGIN);
     string email;
     string passwd;
+
+    // 1. 在客户端本地一次性收集完所有信息
     while (true) {
-        std::cout << "请输入你的邮箱：" << std::endl;
+        std::cout << "请输入你的邮箱(输入0返回)：" << std::endl;
         getline(cin, email);
+        if (email == "0") return 0;
         if (email.empty()) {
             cout << "邮箱不能为空，请重新输入。" << endl;
             continue;
@@ -72,59 +74,50 @@ int login(int fd, User &user) {
         }
         break;
     }
-    while (true) {
-        get_password("请输入你的密码: ", passwd);
-        if (passwd.empty()) {
-            cout << "密码不能为空，请重新输入。" << endl;
-            continue;
-        }
-        if (passwd.find(' ') != string::npos) {
-            cout << "密码不能包含空格，请重新输入。" << endl;
-            continue;
-        }
-        break;
-    }
-    //发
-    LoginRequest loginRequest(email, passwd);
-    sendMsg(fd, loginRequest.to_json());
-    string buf;
-    recvMsg(fd, buf);
-    if (buf == "-1") {
-        cout << "账号不存在" << endl;
-        return 0;
-    } else if (buf == "-2") {
-        cout << "密码错误" << endl;
-        int choice;
-        while (true) {
-            cout << "请选择：[1]重试登录  [0]返回首页" << endl;
-            if (!(cin >> choice)) {
-                cout << "输入格式错误" << endl;
-                cin.clear();
-                cin.ignore(INT32_MAX, '\n');
-                continue;
-            }
-            cin.ignore(INT32_MAX, '\n');
-            if (choice == 1) {
-                return login(fd, user); // 递归重试
-            } else if (choice == 0) {
-                return 0;
-            } else {
-                cout << "无效选项，请重新输入。" << endl;
-            }
-        }
-    } else if (buf == "-3") {
-        cout << "该用户已经登录" << endl;
-        return 0;
-    }  else if (buf == "1") {
-        cout << "登录成功!" << endl;
-        string user_info;
-        recvMsg(fd, user_info);
-        user.json_parse(user_info);
-        cout << "用户：【" <<user.getUsername()<<"】" <<  endl;
 
-        return 1;
+    get_password("请输入你的密码: ", passwd);
+    if (passwd.empty()) {
+        cout << "密码不能为空，操作取消。" << endl;
+        return 0;
     }
-    return 0;
+
+    // 2. 构建符合新协议的JSON请求
+    json request_json;
+    request_json["flag"] = C2S_LOGIN_REQUEST;
+    request_json["data"]["email"] = email;
+    request_json["data"]["password"] = passwd;
+
+    // 3. 一次性发送完整的请求
+    sendMsg(fd, request_json.dump());
+
+    // 4. 只接收一次最终的服务器响应
+    string response_str;
+    if (recvMsg(fd, response_str) <= 0) {
+        cout << "与服务器断开连接..." << endl;
+        return 0;
+    }
+
+    // 5. 解析服务器的JSON响应
+    try {
+        json response_json = json::parse(response_str);
+        int flag = response_json.value("flag", 0);
+
+        if (flag == S2C_LOGIN_SUCCESS) {
+            cout << "登录成功!" << endl;
+            // 从响应的data字段中解析用户信息
+            user.json_parse(response_json["data"].dump());
+            cout << "欢迎您：【" << user.getUsername() << "】" << endl;
+            return 1; // 返回1表示登录成功
+        } else {
+            // 登录失败，打印出服务器返回的原因
+            string reason = response_json["data"].value("reason", "未知错误");
+            cout << "登录失败: " << reason << endl;
+            return 0; // 返回0表示登录失败
+        }
+    } catch (const json::parse_error& e) {
+        cerr << "[ERROR] 解析服务器响应失败: " << e.what() << "\n响应原文: " << response_str << endl;
+        return 0;
+    }
 }
 
 int email_register(int fd) {

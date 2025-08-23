@@ -173,3 +173,17 @@ int Redis::hlen(const string &key) {
     freeReplyObject(reply);
     return integer;
 }
+
+std::vector<std::string> Redis::lrange_vec(const std::string &key, int start, int stop) {
+    std::vector<std::string> vec;
+    reply = static_cast<redisReply *>(redisCommand(context, "LRANGE %s %d %d", key.c_str(), start, stop));
+    if (reply != nullptr && reply->type == REDIS_REPLY_ARRAY) {
+        for (size_t i = 0; i < reply->elements; ++i) {
+            if (reply->element[i]->str != nullptr) {
+                vec.push_back(reply->element[i]->str);
+            }
+        }
+    }
+    freeReplyObject(reply);
+    return vec;
+}

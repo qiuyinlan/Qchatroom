@@ -35,7 +35,7 @@ public:
 
     void managed_Group(std::vector<Group> &managedGroup) const;
 
-    void approve() const;
+    void approve(const Group& group) const;
 
     void remove(Group &group) const;
 

@@ -2,7 +2,7 @@
 #include "Transaction.h"
 #include <functional>
 #include <sys/epoll.h>
-#include "../utils/IO.h"
+#include "IO.h"
 #include "../utils/proto.h"
 
 // 显式声明utils中的阻塞IO函数，避免与server/IO.h冲突
@@ -131,7 +131,7 @@ void serverLogin(int epfd, int fd) {
     string request;
 
     int recv_ret = recvMsg(fd, request);
-    
+    cout << "recv = " << request << endl;
     if (recv_ret < 0 || request.empty()) {
         cout << "[ERROR] 接收登录请求失败或为空" << endl;
         sendMsg(fd, "-4"); // 服务器内部错误
@@ -208,23 +208,25 @@ void serverLogin(int epfd, int fd) {
 //登陆后业务分发
 
 void serverOperation(int fd, User &user) {
- 
+    //  struct epoll_event temp;
+    // temp.data.fd = fd;
+    // temp.events = EPOLLIN;
+cout << "serverOperation" << endl;
     Redis redis;
     redis.connect();
     string temp;
     int ret;
-    while (true) {
+   
         //接收用户输入的操作
         ret = recvMsg(fd, temp);
        
         if (temp == BACK ) {
             cout << "收到客户端在主页退出，成功" << endl ;
-
-            break;
+            redis.hdel("is_online", user.getUID());
+            redis.hdel("unified_receiver", user.getUID());  // 清理统一接收连接记录
         }
-
-        
         if (temp == START_CHAT) {
+            cout << "收到客户端在聊天页面退出，成功" << endl ;
             start_chat_mysql(fd, user);  // 只有聊天消息存储用MySQL
         } else if (temp == LIST_FRIENDS) {
             list_friend(fd, user);
@@ -258,12 +260,10 @@ void serverOperation(int fd, User &user) {
         } else {
             cout << "[DEBUG] 收到未知协议: '" << temp << "' (长度: " << temp.length() << ")" << endl;
             cout << "没有这个选项，请重新输入: " << temp << endl;
-            continue;
+
         }
-    }
-    redis.hdel("is_online", user.getUID());
-    redis.hdel("unified_receiver", user.getUID());  // 清理统一接收连接记录
-  
+
+    // epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp);
 }
 
 void notify(int fd, const string &UID) {//离线通知

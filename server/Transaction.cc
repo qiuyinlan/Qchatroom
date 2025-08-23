@@ -1,7 +1,7 @@
 #include "Transaction.h"
 #include "Redis.h"
 #include "MySQL.h"
-#include "../utils/IO.h"
+#include "IO.h"
 #include "../utils/proto.h"
 #include <iostream>
 #include "group_chat.h"

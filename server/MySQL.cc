@@ -82,14 +82,14 @@ bool MySQL::connect() {
     }
     
     // 自动提交模式
-    if (mysql_autocommit(conn, 1)) {
-        cout << "[MySQL ERROR] Failed to set autocommit: " << mysql_error(conn) << endl;
+    if (mysql_autocommit(conn, 0)) { // Turn OFF autocommit
+        cout << "[MySQL ERROR] Failed to turn off autocommit: " << mysql_error(conn) << endl;
         mysql_close(conn);
         conn = nullptr;
         return false;
     }
 
-    cout << "[MySQL] Connected successfully with autocommit enabled" << endl;
+    cout << "[MySQL] Connected successfully with autocommit DISABLED" << endl;
     return true;
 }
 
@@ -161,8 +161,15 @@ bool MySQL::insertGroupMessage(const string& group_uid, const string& sender_uid
         return false;
     }
 
+    // Explicitly commit the transaction
+    if (mysql_commit(conn) != 0) {
+        cout << "[MySQL ERROR] mysql_commit failed: " << mysql_error(conn) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
     mysql_stmt_close(stmt);
-    cout << "[MySQL] Group message inserted successfully (pure content)" << endl;
+    cout << "[MySQL] Group message inserted and committed successfully" << endl;
     return true;
 }
 
@@ -217,8 +224,15 @@ bool MySQL::insertPrivateMessage(const string& sender_uid, const string& receive
         return false;
     }
 
+    // Explicitly commit the transaction
+    if (mysql_commit(conn) != 0) {
+        cout << "[MySQL ERROR] mysql_commit failed: " << mysql_error(conn) << endl;
+        mysql_stmt_close(stmt);
+        return false;
+    }
+
     mysql_stmt_close(stmt);
-    cout << "[MySQL] Private message inserted successfully" << endl;
+    cout << "[MySQL] Private message inserted and committed successfully" << endl;
     return true;
 }
 

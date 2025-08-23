@@ -16,36 +16,63 @@ using namespace std;
 
 #define MAX_MSG_LEN 10000
 
+int read_n(int fd, char *msg, int n) {
+    int n_left = n;
+    int n_read;
+    char *ptr = msg;
+    while (n_left > 0) {
+        if ((n_read = recv(fd, ptr, n_left, 0)) < 0) {
+            if (errno == EINTR || errno == EWOULDBLOCK) {
+                n_read = 0;  // 继续尝试
+            } else {
+                return -1;  // 真正的错误
+            }
+        } else if (n_read == 0) {
+            // 对端关闭连接，但我们还没读完所需的数据
+            if (n_left == n) {
+                // 一开始就没读到数据，返回0表示连接关闭
+                return 0;
+            } else {
+                // 读到了部分数据但连接关闭了，这是错误情况
+                cout << "连接意外关闭，期望读取 " << n << " 字节，实际读取 " << (n - n_left) << " 字节" << endl;
+                return -1;
+            }
+        }
+        ptr += n_read;
+        n_left -= n_read;
+    }
+    return n - n_left;  // 应该等于 n
+}
+
+int write_n (int fd, const char *msg, int n) {
+    int n_written;
+    int n_left = n;
+    const char *ptr = msg;
+    while (n_left > 0) {
+        if ((n_written = send(fd, ptr, n_left, 0)) < 0) {
+            if (n_written < 0 && errno == EINTR)
+                continue;
+            else
+                return -1;
+        } else if (n_written == 0) {
+            continue;
+        }
+        ptr += n_written;
+        n_left -= n_written;
+    }
+    return n;
+}
+
 
 
 // 维护每个fd的发送缓冲区状态
-struct SendBuffer {
-    vector<char> data;
-    size_t sent_bytes = 0;
-};
+
 // 新增：添加互斥锁保护缓冲区访问
 #include <mutex>
 std::mutex buffer_mutex;
 
-// 维护每个fd的接收缓冲区状态
-struct RecvBuffer {
-    char header_buf[4];
-    int header_read = 0;
-    int msg_len = 0;
-    vector<char> msg_buf;
-    int msg_read = 0;
 
-    // 显式初始化函数
-    void reset() {
-        memset(header_buf, 0, 4);
-        header_read = 0;
-        msg_len = 0;
-        msg_buf.clear();
-        msg_read = 0;
-    }
-};
-
-// 模拟外部存储，每个fd对应一个接收和发送缓冲区
+// Definition of the global buffer maps. They are declared as extern in IO.h
 unordered_map<int, RecvBuffer> recvBuffers;
 unordered_map<int, SendBuffer> sendBuffers;
 
@@ -56,7 +83,7 @@ void clearBuffers(int fd) {
     sendBuffers.erase(fd);
 }
 
-int recvMsgET(int fd, string &msg) {
+int recvMsg(int fd, string &msg) {
     // 加锁保护缓冲区访问
     std::lock_guard<std::mutex> lock(buffer_mutex);
 
@@ -144,7 +171,7 @@ int recvMsgET(int fd, string &msg) {
 
 
 // ET模式下非阻塞写，调用多次直到写完或返回EAGAIN
-int sendMsgET(int fd, string msg) {
+int sendMsg(int fd, string msg) {
     if (fd < 0) {
         cerr << "[ERROR] sendMsg: 无效fd=" << fd << endl;
         return -1;
