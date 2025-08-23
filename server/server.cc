@@ -40,7 +40,7 @@ using namespace std;
 extern int recvMsg(int fd, std::string &msg); // 来自 IO.cc
 #include "ServerState.h"
 
-// 🚀 New Event-Driven Function Declarations
+
 void handleReadEvent(int epfd, int fd, ThreadPool& pool);
 void handleWriteEvent(int epfd, int fd);
 void handleCloseEvent(int epfd, int fd);
@@ -71,7 +71,6 @@ void signalHandler(int signum) {
 
 }
 
-// 旧的心跳函数已删除，心跳功能现在集成在统一接收连接中
 
 
 int main(int argc, char *argv[]) {

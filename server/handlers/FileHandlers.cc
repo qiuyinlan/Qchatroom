@@ -1,9 +1,9 @@
 #include "FileHandlers.h"
 #include "../ServerState.h"
-#include "../proto.h"
+#include "../utils/proto.h"
 #include "../Redis.h"
-#include "../User.h"
-#include "../Message.h"
+#include "../utils/User.h"
+
 #include <iostream>
 #include <sys/epoll.h>
 #include <sys/socket.h>
@@ -12,38 +12,7 @@
 
 using namespace std;
 
-// Helper function from the old server.cc, needed for notifications
-string getUsernameFromRedis(const string& uid) {
-    Redis redis;
-    if (redis.connect()) {
-        string user_info_str = redis.hget("user_info", uid);
-        if (!user_info_str.empty()) {
-            try {
-                nlohmann::json user_json = nlohmann::json::parse(user_info_str);
-                return user_json.value("username", "");
-            } catch (const nlohmann::json::parse_error& e) {
-                return "";
-            }
-        }
-    }
-    return "";
-}
 
-string getGroupNameFromRedis(const string& group_uid) {
-    Redis redis;
-    if (redis.connect()) {
-        string group_info_str = redis.hget("group_info", group_uid);
-        if (!group_info_str.empty()) {
-            try {
-                nlohmann::json group_json = nlohmann::json::parse(group_info_str);
-                return group_json.value("groupName", "");
-            } catch (const nlohmann::json::parse_error& e) {
-                return "";
-            }
-        }
-    }
-    return "";
-}
 
 void handleFileData(int epfd, int fd, const char* data, int len) {
     lock_guard<mutex> lock(transfer_states_mutex);

@@ -48,42 +48,72 @@ make
 
 ```
 MessengerRebuild/
-├── CMakeLists.txt              # CMake构建配置
-├── README.md                   # 项目说明文档
-├── architecture_diagrams.md   # 架构图文档
-├── migrate_group_messages.sql # 数据迁移脚本
-├── build/                      # 构建目录
-│   ├── server.out             # 服务器可执行文件
-│   ├── client.out             # 客户端可执行文件
-│   └── ...                    # 其他构建文件
-├── server/                     # 服务器端代码
-│   ├── server.cc              # 主服务器程序
-│   ├── IO.cc/IO.h             # IO处理层(ET模式)
-│   ├── Transaction.cc/.h      # 业务逻辑处理
-│   ├── group_chat.cc/.h       # 群聊功能模块
-│   ├── LoginHandler.cc/.h     # 登录处理模块
-│   ├── Redis.cc/.h            # Redis数据库接口
-│   ├── MySQL.cc/.h            # MySQL数据库接口
-│   ├── ThreadPool.hpp         # 线程池实现
-│   └── Threadpool.cpp         # 线程池实现
-├── client/                     # 客户端代码
-│   ├── client.cc/.h           # 客户端主程序
-│   ├── controller/            # 控制层
-│   │   ├── StartMenu.cc/.h    # 启动菜单
-│   │   └── OperationMenu.cc/.h # 操作菜单
-│   ├── social/                # 社交功能层
-│   │   ├── FriendManager.cc/.h # 好友管理
-│   │   ├── chat.cc/.h         # 私聊功能
-│   │   └── G_chat.cc/.h       # 群聊功能
-│   └── service/               # 服务层
-│       ├── FileTransfer.cc/.h # 文件传输
-│       └── Notifications.cc/.h # 通知服务
-└── utils/                      # 工具类
-    ├── User.cc/.h             # 用户模型
-    ├── Group.cc/.h            # 群组模型
-    ├── TCP.cc/.h              # TCP网络工具
-    ├── IO.cc/.h               # IO工具函数
-    └── proto.cc/.h            # 协议处理
+
+.
+├── client
+│   ├── client.cc
+│   ├── client.h
+│   ├── controller
+│   │   ├── OperationMenu.cc
+│   │   ├── OperationMenu.h
+│   │   ├── StartMenu.cc
+│   │   └── StartMenu.h
+│   ├── service
+│   │   ├── FileTransfer.cc
+│   │   ├── FileTransfer.h
+│   │   ├── Notifications.cc
+│   │   └── Notifications.h
+│   └── social
+│       ├── chat.cc
+│       ├── chat.h
+│       ├── FriendManager.cc
+│       ├── FriendManager.h
+│       ├── G_chat.cc
+│       └── G_chat.h
+├── CMakeLists.txt
+├── README.md
+├── server
+│   ├── FileTransferState.h
+│   ├── group_chat.cc
+│   ├── group_chat.h
+│   ├── handlers
+│   │   ├── ChatHandlers.cc
+│   │   ├── ChatHandlers.h
+│   │   ├── FileHandlers.cc
+│   │   ├── FileHandlers.h
+│   │   ├── FriendHandlers.cc
+│   │   ├── FriendHandlers.h
+│   │   ├── GroupHandlers.cc
+│   │   ├── GroupHandlers.h
+│   │   ├── UserHandlers.cc
+│   │   └── UserHandlers.h
+│   ├── IO.cc
+│   ├── IO.h
+│   ├── LoginHandler.cc
+│   ├── LoginHandler.h
+│   ├── MySQL.cc
+│   ├── MySQL.h
+│   ├── Redis.cc
+│   ├── Redis.h
+│   ├── server.cc
+│   ├── ServerState.cc
+│   ├── ServerState.h
+│   ├── Threadpool.cpp
+│   ├── ThreadPool.hpp
+│   ├── Transaction.cc
+│   └── Transaction.h
+└── utils
+    ├── Group.cc
+    ├── Group.h
+    ├── IO.cc
+    ├── IO.h
+    ├── proto.cc
+    ├── proto.h
+    ├── TCP.cc
+    ├── TCP.h
+    ├── User.cc
+    └── User.h
+
 ```
 
 ## 🛠️ 技术栈

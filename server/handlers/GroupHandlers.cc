@@ -1,8 +1,8 @@
 #include "GroupHandlers.h"
 #include "../utils/proto.h"
 #include "../utils/IO.h"
-#include "../User.h"
-#include "../Group.h"
+#include "../utils/User.h"
+#include "../utils/Group.h"
 #include "../MySQL.h"
 #include "../Redis.h"
 #include <iostream>
@@ -14,37 +14,7 @@ using json = nlohmann::json;
 
 #include "../ServerState.h"
 
-string getUsernameFromRedis(const string& uid) {
-    Redis redis;
-    if (redis.connect()) {
-        string user_info_str = redis.hget("user_info", uid);
-        if (!user_info_str.empty()) {
-            try {
-                json user_json = json::parse(user_info_str);
-                return user_json.value("username", "");
-            } catch (const json::parse_error& e) {
-                return "";
-            }
-        }
-    }
-    return "";
-}
 
-string getGroupNameFromRedis(const string& group_uid) {
-    Redis redis;
-    if (redis.connect()) {
-        string group_info_str = redis.hget("group_info", group_uid);
-        if (!group_info_str.empty()) {
-            try {
-                json group_json = json::parse(group_info_str);
-                return group_json.value("group_name", "");
-            } catch (const json::parse_error& e) {
-                return "";
-            }
-        }
-    }
-    return "";
-}
 
 void handleStartGroupChatRequest(int epfd, int fd, const nlohmann::json& msg) {
     cout << "[业务] 处理fd=" << fd << " 的开始群聊请求" << endl;
@@ -76,6 +46,8 @@ void handleStartGroupChatRequest(int epfd, int fd, const nlohmann::json& msg) {
 
     sendMsg(epfd, fd, response.dump());
 }
+
+
 
 void handleGroupMessage(int epfd, int fd, const nlohmann::json& msg) {
     string sender_uid = getUidByFd(fd);
@@ -560,6 +532,8 @@ void handleRevokeAdminRequest(int epfd, int fd, const nlohmann::json& msg) {
     response["data"]["success"] = true;
     response["data"]["reason"] = "管理员已撤销";
     sendMsg(epfd, fd, response.dump());
+}
+
 void handleDeleteGroupRequest(int epfd, int fd, const nlohmann::json& msg) {
     cout << "[业务] 处理fd=" << fd << " 的解散群聊请求" << endl;
     nlohmann::json response;
@@ -781,6 +755,6 @@ void handleInviteToGroupRequest(int epfd, int fd, const nlohmann::json& msg) {
     sendMsg(epfd, fd, response.dump());
 }
 
-}
+
 
 

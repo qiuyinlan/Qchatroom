@@ -1,7 +1,7 @@
 #include "UserHandlers.h"
 #include "../utils/proto.h"
 #include "../utils/IO.h"
-#include "../User.h"
+#include "../utils/User.h"
 #include "../Redis.h"
 #include <iostream>
 #include <string>

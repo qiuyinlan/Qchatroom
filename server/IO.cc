@@ -74,7 +74,7 @@ std::mutex buffer_mutex;
 
 // Definition of the global buffer maps. They are declared as extern in IO.h
 unordered_map<int, RecvBuffer> recvBuffers;
-unordered_map<int, SendBuffer> sendBuffers;
+
 
 // 清理fd对应的缓冲区
 void clearBuffers(int fd) {

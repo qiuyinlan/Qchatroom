@@ -3,7 +3,7 @@
 #include "../utils/IO.h"
 #include "../Redis.h"
 #include "../MySQL.h"
-#include "../User.h"
+#include "../utils/User.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -13,38 +13,7 @@ using json = nlohmann::json;
 
 #include "../ServerState.h"
 
-// Helper functions (ideally should be in a shared utility file)
-string getUsernameFromRedis(const string& uid) {
-    Redis redis;
-    if (redis.connect()) {
-        string user_info_str = redis.hget("user_info", uid);
-        if (!user_info_str.empty()) {
-            try {
-                json user_json = json::parse(user_info_str);
-                return user_json.value("username", "");
-            } catch (const json::parse_error& e) {
-                return "";
-            }
-        }
-    }
-    return "";
-}
 
-string getGroupNameFromRedis(const string& group_uid) {
-    Redis redis;
-    if (redis.connect()) {
-        string group_info_str = redis.hget("group_info", group_uid);
-        if (!group_info_str.empty()) {
-            try {
-                json group_json = json::parse(group_info_str);
-                return group_json.value("group_name", "");
-            } catch (const json::parse_error& e) {
-                return "";
-            }
-        }
-    }
-    return "";
-}
 
 void handleGetChatLists(int epfd, int fd, const nlohmann::json& msg) {
     cout << "[业务] 处理fd=" << fd << " 的获取聊天列表请求" << endl;
@@ -159,39 +128,6 @@ void handlePrivateMessage(int epfd, int fd, const nlohmann::json& msg) {
     }
 }
 
-void handleGroupMessage(int epfd, int fd, const nlohmann::json& msg) {
-    string sender_uid = getUidByFd(fd);
-    if (sender_uid.empty()) return;
-
-    auto data = msg["data"];
-    string group_uid = data.value("group_uid", "");
-    string content = data.value("content", "");
-
-    g_mysql.insertGroupMessage(group_uid, sender_uid, content);
-
-    Redis redis;
-    if (redis.connect()) {
-        redisReply *replies = redis.smembers("group_members:" + group_uid);
-        if (replies) {
-            for (size_t i = 0; i < replies->elements; ++i) {
-                if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
-                string member_uid = replies->element[i]->str;
-                if (member_uid != sender_uid && redis.hexists("is_online", member_uid)) {
-                    int member_fd = stoi(redis.hget("is_online", member_uid));
-                    nlohmann::json forward_msg;
-                    forward_msg["flag"] = S2C_GROUP_MESSAGE;
-                    forward_msg["data"]["content"] = content;
-                    forward_msg["data"]["group_uid"] = group_uid;
-                    forward_msg["data"]["sender_uid"] = sender_uid;
-                    forward_msg["data"]["username"] = getUsernameFromRedis(sender_uid);
-                    forward_msg["data"]["group_name"] = getGroupNameFromRedis(group_uid);
-                    sendMsg(epfd, member_fd, forward_msg.dump());
-                }
-            }
-            freeReplyObject(replies);
-        }
-    }
-}
 
 void handleExitChatRequest(int epfd, int fd, const nlohmann::json& msg) {
     cout << "[业务] 处理fd=" << fd << " 的退出聊天请求" << endl;

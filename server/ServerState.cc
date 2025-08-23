@@ -4,7 +4,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/epoll.h>
-#include "utils/IO.h"
+
+#include "Redis.h"
 
 // Global variable definitions
 MySQL g_mysql;
@@ -14,8 +15,7 @@ std::unordered_map<std::string, time_t> last_activity;
 std::unordered_map<int, std::string> fd_to_uid;
 std::mutex activity_mutex;
 
-// A buffer for sending messages, declared here as it's used by sendMsg
-extern std::map<int, SendBuffer> sendBuffers;
+std::unordered_map<int, SendBuffer> sendBuffers;
 
 void updateUserActivity(const std::string& uid) {
     std::lock_guard<std::mutex> lock(activity_mutex);

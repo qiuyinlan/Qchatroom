@@ -2,12 +2,14 @@
 #define SERVERSTATE_H
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <map>
 #include <mutex>
 #include <ctime>
 #include "MySQL.h"
 #include "FileTransferState.h"
+#include "IO.h"
 
 // Global MySQL connection object
 extern MySQL g_mysql;
