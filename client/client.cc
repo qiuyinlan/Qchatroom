@@ -95,19 +95,19 @@ int main(int argc, char *argv[]) {
             continue;
         }
         if (opt == 2) {
-            email_register(fd);
+            clientRegisterWithCode(fd);
             close(fd);  // 注册完成后关闭连接
             continue;
         }
-        if (opt == 3) {
-            email_reset_password(fd);
-            close(fd);  // 重置密码完成后关闭连接
-            continue;
-        }
-        if (opt == 4) {
-            email_find_password(fd);
-            close(fd);  // 找回密码完成后关闭连接
-            continue;
-        }
+        // if (opt == 3) {
+        //     email_reset_password(fd);
+        //     close(fd);  // 重置密码完成后关闭连接
+        //     continue;
+        // }
+        // if (opt == 4) {
+        //     email_find_password(fd);
+        //     close(fd);  // 找回密码完成后关闭连接
+        //     continue;
+        // }
     }
 }

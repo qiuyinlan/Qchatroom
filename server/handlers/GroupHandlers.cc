@@ -61,21 +61,26 @@ void handleGroupMessage(int epfd, int fd, const nlohmann::json& msg) {
 
     Redis redis;
     if (redis.connect()) {
+        Message message(getUsernameFromRedis(sender_uid), sender_uid, group_uid, getGroupNameFromRedis(group_uid));
+        message.setContent(content);
+        string message_json = message.to_json();
+
         redisReply *replies = redis.smembers("group_members:" + group_uid);
         if (replies) {
             for (size_t i = 0; i < replies->elements; ++i) {
                 if (replies->element[i] == nullptr || replies->element[i]->str == nullptr) continue;
                 string member_uid = replies->element[i]->str;
-                if (member_uid != sender_uid && redis.hexists("is_online", member_uid)) {
-                    int member_fd = stoi(redis.hget("is_online", member_uid));
-                    nlohmann::json forward_msg;
-                    forward_msg["flag"] = S2C_GROUP_MESSAGE;
-                    forward_msg["data"]["content"] = content;
-                    forward_msg["data"]["group_uid"] = group_uid;
-                    forward_msg["data"]["sender_uid"] = sender_uid;
-                    forward_msg["data"]["username"] = getUsernameFromRedis(sender_uid);
-                    forward_msg["data"]["group_name"] = getGroupNameFromRedis(group_uid);
-                    sendMsg(epfd, member_fd, forward_msg.dump());
+                if (member_uid == sender_uid) continue; // Don't send to self
+
+                if (redis.hexists("notification_fds", member_uid)) {
+                    int member_fd = stoi(redis.hget("notification_fds", member_uid));
+                    cout << "[实时消息] 转发群聊消息给在线成员 " << member_uid << " (fd: " << member_fd << ")" << endl;
+                    sendMsg(epfd, member_fd, message_json);
+                } else {
+                    cout << "[实时消息] 群成员 " << member_uid << " 不在线, 存储为离线消息" << endl;
+                    // Storing the full message JSON for group notifications might be too much.
+                    // Sticking to the original design of notifying that a group has new messages.
+                    redis.lpush("off_msg:" + member_uid, getGroupNameFromRedis(group_uid));
                 }
             }
             freeReplyObject(replies);

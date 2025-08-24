@@ -194,77 +194,51 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
     cin.ignore(INT32_MAX, '\n');
 
     // 根据选择分发到不同的聊天函数
-    //私聊
     if (who <= my_friends.size()) {
+        // Private Chat Logic Restored
+        string friend_uid = my_friends[who - 1].second.getUID();
+        ClientState::enterChat(friend_uid); // ENTER CHAT STATE
+
         cout << "--------------------------------------" << endl;
         cout << "【好友：" << my_friends[who-1].second.getUsername() << "】"<< endl;
-        // 构建并发送新的JSON请求
-        nlohmann::json req;
-        req["flag"] = C2S_START_CHAT_REQUEST;
-        req["data"]["friend_uid"] = my_friends[who-1].second.getUID();
-        sendMsg(fd, req.dump());
 
-        // 接收服务器响应
-        string response_str;
-        int recv_ret = recvMsg(fd, response_str);
-        if (recv_ret <= 0) {
-            cout << "接收聊天响应失败，连接可能已断开" << endl;
-            return;
-        }
+        // Request chat history
+        nlohmann::json history_req;
+        history_req["flag"] = C2S_GET_HISTORY_REQUEST;
+        history_req["data"]["target_uid"] = friend_uid;
+        history_req["data"]["chat_type"] = "private";
+        sendMsg(fd, history_req.dump());
 
-        // 解析JSON响应
-        try {
-            nlohmann::json res = nlohmann::json::parse(response_str);
-            if (res["data"]["success"].get<bool>()) {
-                Message history_msg;
-                for (const auto& msg_json : res["data"]["history"]) {
-                    history_msg.json_parse(msg_json);
-                    if (history_msg.getUsername() == user.getUsername()) {
-                        cout << "你：" << history_msg.getContent() << endl;
-                    } else {
-                        cout << history_msg.getUsername() << "  :  " << history_msg.getContent() << endl;
+        string history_res_str;
+        if (recvMsg(fd, history_res_str) > 0) {
+            try {
+                auto res = nlohmann::json::parse(history_res_str);
+                if (res["data"]["success"].get<bool>()) {
+                    for (const auto& msg_str : res["data"]["history"]) {
+                        Message history_msg;
+                        history_msg.json_parse(msg_str.get<string>());
+                        if (history_msg.getUsername() == user.getUsername()) {
+                            cout << "你: " << history_msg.getContent() << " (" << history_msg.getTime() << ")" << endl;
+                        } else {
+                            cout << history_msg.getUsername() << ": " << history_msg.getContent() << " (" << history_msg.getTime() << ")" << endl;
+                        }
                     }
-                    cout << "\t\t\t\t" << history_msg.getTime() << endl;
                 }
-            } else {
-                cout << "开始聊天失败: " << res["data"]["reason"].get<string>() << endl;
-                return;
-            }
-        } catch (const nlohmann::json::parse_error& e) {
-            cout << "解析聊天响应失败: " << e.what() << endl;
-            return;
+            } catch (const nlohmann::json::parse_error& e) {}
         }
-        
         cout << YELLOW << "-------------------以上为历史消息-------------------" << RESET << endl;
 
-        
-        Message message(user.getUsername(), user.getUID(), my_friends[who-1].second.getUID(),"1");
-        string friend_UID = my_friends[who-1].second.getUID();
-
-        // 通知统一接收线程
-        ClientState::enterChat(friend_UID);
-
-       
-        string msg, json, reply;
-
-        //真正开始聊天
+        string msg;
         std::cout << "\033[90m输入【\\send】发送文件，【\\recv】接收文件，【\\quit】退出聊天\033[0m" << std::endl;
 
         while (true) {
-            getline(cin,msg);
+            getline(cin, msg);
             if (cin.eof()) {
-                cout << "\n检测到输入结束 (Ctrl+D)，退出聊天" << endl;
                 cin.clear();
-                sendMsg(fd, EXIT);
-                return;
+                break;
             }
             if (msg == "\\quit") {
-                // 退出聊天状态
-                ClientState::exitChat();
-                nlohmann::json req;
-                req["flag"] = C2S_EXIT_CHAT_REQUEST;
-                sendMsg(fd, req.dump());
-                return;
+                break;
             }
             if (msg == "\\send") {
                 FileTransfer fileTransfer;
@@ -277,21 +251,27 @@ void ChatSession::startChat(vector<pair<string, User>> &my_friends,vector<Group>
                 fileTransfer.recvFile_Friend(fd, user);
                 continue;
             }
-            else if(msg.empty()){
+            if (msg.empty()) {
                 cout << "不能发送空白消息" << endl;
                 continue;
             }
+
             nlohmann::json req;
             req["flag"] = C2S_PRIVATE_MESSAGE;
-            req["data"]["receiver_uid"] = my_friends[who-1].second.getUID();
+            req["data"]["receiver_uid"] = friend_uid;
             req["data"]["content"] = msg;
             sendMsg(fd, req.dump());
             cout << "你：" << msg << endl;
         }
+        ClientState::exitChat(); // EXIT CHAT STATE
+
     } else {
-        // 选择的是群聊聊天
+        // Group Chat
         int groupIndex = who - my_friends.size() - 1;
+        const Group& selectedGroup = joinedGroup[groupIndex];
+        ClientState::enterChat(selectedGroup.getGroupUid()); // ENTER CHAT STATE
         startGroupChat(groupIndex, joinedGroup);
+        ClientState::exitChat(); // EXIT CHAT STATE
     }
 }
 

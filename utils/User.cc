@@ -116,6 +116,9 @@ void User::json_parse(const nlohmann::json& j) {
         if (j.contains("password") && j["password"].is_string()) {
             password = j.value("password", "");
         }
+        if (j.contains("is_online") && j["is_online"].is_boolean()) {
+            is_online = j.value("is_online", false);
+        }
         cout << "[DEBUG] Parsed User: UID=" << UID << ", Username=" << username << endl;
     } catch (const std::exception& e) {
         std::cerr << "[ERROR] User JSON解析失败: " << e.what() << std::endl;

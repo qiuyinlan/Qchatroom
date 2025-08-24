@@ -26,6 +26,18 @@
 #include "User.h"
 #include "MySQL.h"
 
+#include "handlers/UserHandlers.h"
+#include "handlers/FriendHandlers.h"
+#include "handlers/GroupHandlers.h"
+#include "handlers/ChatHandlers.h"
+#include "handlers/FileHandlers.h"
+#include "LoginHandler.h"
+#include "handlers/RegistrationHandlers.h"
+
+
+
+
+
 #include "IO.h"
 #include "Group.h"
 #include "group_chat.h"
@@ -159,7 +171,7 @@ int main(int argc, char *argv[]) {
             int fd = ep[i].data.fd;
             //新连接
             if (fd == listenfd) {
-                while (true) {
+                
                     struct sockaddr_in cli_addr;
                     memset(&cli_addr, 0, sizeof(cli_addr));
                     socklen_t cli_len = sizeof(cli_addr);
@@ -194,7 +206,7 @@ int main(int argc, char *argv[]) {
                     if (epoll_ctl(epfd, EPOLL_CTL_ADD, connfd, &temp) < 0) {
                         sys_err("epoll_ctl error for connfd");
                     }
-                }
+                
             } else {
 
                 if (ep[i].events & (EPOLLHUP | EPOLLERR)) {
@@ -314,6 +326,13 @@ void handleMessage(int epfd, int fd, const std::string& json_msg) {
             case C2S_LOGOUT_REQUEST: handleLogoutRequest(epfd, fd, msg); break;
             case C2S_DEACTIVATE_ACCOUNT_REQUEST: handleDeactivateAccountRequest(epfd, fd, msg); break;
             case C2S_HEARTBEAT: handleHeartbeat(epfd, fd, msg); break;
+            case C2S_REQUEST_OFFLINE_NOTIFICATIONS: handleRequestOfflineNotifications(epfd, fd, msg); break;
+
+            // Registration Handlers
+            case C2S_REQUEST_CODE:
+                handleRequestCode(epfd, fd, msg); break;
+            case C2S_REGISTER_WITH_CODE:
+                serverRegisterWithCode(epfd, fd, msg); break;
 
             // Friend
             case C2S_ADD_FRIEND_REQUEST: handleAddFriendRequest(epfd, fd, msg); break;
@@ -368,6 +387,7 @@ void handleMessage(int epfd, int fd, const std::string& json_msg) {
 
 
 
+            
 
 
 

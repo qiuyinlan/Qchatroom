@@ -34,7 +34,7 @@ void handleLoginRequest(int epfd, int fd, const nlohmann::json& msg) {
 
     Redis redis;
     if (!redis.connect()) {
-        cerr << "[ERROR] fd=" << fd << " 的登录流程中Redis连接失败" << endl;
+        cerr << "[ERROR] fd=" << fd << "+ 的登录流程中Redis连接失败" << endl;
         response["flag"] = S2C_LOGIN_FAILURE;
         response["data"]["reason"] = "服务器内部错误 (Redis连接).";
         sendMsg(epfd, fd, response.dump());
@@ -98,6 +98,7 @@ void handleLoginRequest(int epfd, int fd, const nlohmann::json& msg) {
                 cout << "[状态通知] 用户 " << UID << " 上线, 正在通知好友 " << friend_uid << " (fd: " << friend_fd << ")" << endl;
                 notification["flag"] = S2C_FRIEND_STATUS_CHANGE;
                 notification["data"]["uid"] = UID;
+                notification["data"]["username"] = user.getUsername();
                 notification["data"]["is_online"] = true;
                 sendMsg(epfd, friend_fd, notification.dump());
             }
@@ -125,6 +126,7 @@ void handleLogoutRequest(int epfd, int fd, const nlohmann::json& msg) {
                         nlohmann::json notification;
                         notification["flag"] = S2C_FRIEND_STATUS_CHANGE;
                         notification["data"]["uid"] = uid;
+                        notification["data"]["username"] = getUsernameFromRedis(uid);
                         notification["data"]["is_online"] = false;
                         sendMsg(epfd, friend_fd, notification.dump());
                     }
@@ -190,12 +192,18 @@ void handleDeactivateAccountRequest(int epfd, int fd, const nlohmann::json& msg)
 
 void handleHeartbeat(int epfd, int fd, const nlohmann::json& msg) {
     if (msg.contains("data") && msg["data"].contains("uid")) {
-        string uid = msg["data"]["uid"].get<string>();
-        addFdToUid(fd, uid);
-        cout << "[心跳] 收到心跳，fd=" << fd << ", uid=" << uid << endl;
-        updateUserActivity(uid);
+        string uid = msg["data"].value("uid", "");
+        if (!uid.empty()) {
+            cout << "[心跳] 收到心跳, fd=" << fd << ", uid=" << uid << endl;
+            Redis redis;
+            if (redis.connect()) {
+                redis.hset("notification_fds", uid, to_string(fd));
+            }
+            updateUserActivity(uid);
+        }
     } else {
         cout << "[警告] 收到一个不规范的心跳包，已忽略。fd=" << fd << endl;
     }
 }
+
 

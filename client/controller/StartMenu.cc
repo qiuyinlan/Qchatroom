@@ -142,7 +142,7 @@ int email_register(int fd) {
             if(server_reply == "邮箱已存在"){
                 prompt = "该邮箱已注册，请重新输入邮箱（输入0返回）：";
                 continue;
-            }   
+            }
         }
         break;
 
@@ -165,7 +165,7 @@ int email_register(int fd) {
             if(server_reply == "已存在"){
                 prompt = "该用户名已注册，请重新输入（输入0返回）：";
                 continue;
-            }   
+            }
         }
         break;
 
@@ -178,26 +178,26 @@ int email_register(int fd) {
     recvMsg(fd, server_reply);
     cout << server_reply << endl;//验证码发送是否成功的消息
     if (server_reply.find("失败") != string::npos) return 0;
-   
-    
-    while (true) { 
+
+
+    while (true) {
         cout << "请输入收到的验证码: ";
         std::getline(std::cin, code);
         if (code.empty()) {
             cout << "验证码不能为空！" << endl;
         }else {
-            break; 
+            break;
         }
     }
-    
+
 
     get_password("请输入你的密码: ", password);
     while (true) {
-       
+
         get_password("请再次输入你的密码: ", password2);
         if (password != password2) {
             cout << "两次密码不一致！请重新输入。" << endl;
-          
+
             get_password("请输入你的密码: ", password);
             continue;
         }
@@ -219,23 +219,136 @@ int email_register(int fd) {
     return server_reply == "注册成功";
 }
 
-int email_reset_password(int fd) {
-    string email, code, password, password2, server_reply;
-    cout << "请输入你的邮箱: ";
+// int email_reset_password(int fd) {
+//     string email, code, password, password2, server_reply;
+//     cout << "请输入你的邮箱: ";
+//     getline(cin, email);
+//     if (email.empty()) {
+//         cout << "邮箱不能为空！" << endl;
+//         return 0;
+//     }
+//     // 获取验证码
+//     cout << "按回车获取验证码..." << endl;
+//     cin.ignore(INT32_MAX, '\n');
+//     sendMsg(fd, REQUEST_RESET_CODE);
+//     sendMsg(fd, email);
+//     recvMsg(fd, server_reply);
+//     cout << server_reply << endl;
+//     if (server_reply.find("失败") != string::npos) return 0;
+//     // 优化：循环输入验证码，不能为空
+//     while (true) {
+//         cout << "请输入收到的验证码: ";
+//         getline(cin, code);
+//         if (code.empty()) {
+//             cout << "验证码不能为空！" << endl;
+//             continue;
+//         }
+//         break;
+//     }
+
+//     get_password("请输入新密码: ", password);
+//     get_password("请再次输入新密码: ", password2);
+//     if (password != password2) {
+//         cout << "两次密码不一致！" << endl;
+//         return 0;
+//     }
+//     // 组装JSON
+//     json root;
+//     root["email"] = email;
+//     root["code"] = code;
+//     root["password"] = password;
+//     string json_str = root.dump();
+//     sendMsg(fd, RESET_PASSWORD_WITH_CODE);
+//     sendMsg(fd, json_str);
+//     recvMsg(fd, server_reply);
+//     cout << server_reply << endl;
+//     return server_reply == "密码重置成功";
+// }
+
+// int email_find_password(int fd) {
+//     string email, code, server_reply;
+
+
+//     while (true) {
+//         cout << "请输入你的邮箱: ";
+//         getline(cin, email);
+//         if (email.empty()) {
+//             cout << "邮箱不能为空！" << endl;
+//             continue;
+//         }
+//         break;
+//     }
+//     // 获取验证码
+//     cout << "按回车获取验证码..." << endl;
+//     cin.ignore(INT32_MAX, '\n');
+//     sendMsg(fd, REQUEST_RESET_CODE); // 复用请求验证码的协议
+//     sendMsg(fd, email);
+//     recvMsg(fd, server_reply);
+//     cout << server_reply << endl;
+//     if (server_reply.find("失败") != string::npos) return 0;
+//     // 循环输入验证码，不能为空
+
+
+// }
+void clientRegisterWithCode(int fd) {
+    string email, username, password, code, response;
+
+    cout << "请输入邮箱: ";
     getline(cin, email);
     if (email.empty()) {
-        cout << "邮箱不能为空！" << endl;
-        return 0;
+        cout << "邮箱不能为空。" << endl;
+        return;
     }
-    // 获取验证码
-    cout << "按回车获取验证码..." << endl;
-    cin.ignore(INT32_MAX, '\n');
-    sendMsg(fd, REQUEST_RESET_CODE);
-    sendMsg(fd, email);
-    recvMsg(fd, server_reply);
-    cout << server_reply << endl;
-    if (server_reply.find("失败") != string::npos) return 0;
-    // 优化：循环输入验证码，不能为空
+
+    cout << "请输入用户名: ";
+    getline(cin, username);
+    if (username.empty()) {
+        cout << "用户名不能为空。" << endl;
+        return;
+    }
+
+    // 1. 发送邮箱和用户名到服务器，请求验证码
+    nlohmann::json req_code;
+    req_code["flag"] = C2S_REQUEST_CODE;
+    req_code["data"]["email"] = email;
+    req_code["data"]["username"] = username;
+    sendMsg(fd, req_code.dump());
+
+    // 2. 接收服务器的响应
+    if (recvMsg(fd, response) <= 0) {
+        cout << "与服务器通信失败。" << endl;
+        return;
+    }
+
+    cout << "服务器响应: " << response << endl;
+    if (response != "验证码已发送，请查收邮箱") {
+        return; // 如果服务器返回任何错误信息，则终止注册流程
+    }
+
+    // 3. 输入验证码和密码
+    cout << "请输入您收到的验证码: ";
+    getline(cin, code);
+
+    get_password("请输入密码: ",password);
+
+    // 4. 发送所有信息到服务器进行最终注册
+    nlohmann::json req_register;
+    req_register["flag"] = C2S_REGISTER_WITH_CODE;
+    req_register["data"]["email"] = email;
+    req_register["data"]["username"] = username;
+    req_register["data"]["password"] = password;
+    req_register["data"]["code"] = code;
+    sendMsg(fd, req_register.dump());
+
+    // 5. 接收最终的注册结果
+    if (recvMsg(fd, response) <= 0) {
+        cout << "与服务器通信失败。" << endl;
+        return;
+    }
+
+    cout << "服务器响应: " << response << endl;
+
+
     while (true) {
         cout << "请输入收到的验证码: ";
         getline(cin, code);
@@ -245,66 +358,21 @@ int email_reset_password(int fd) {
         }
         break;
     }
-
-    get_password("请输入新密码: ", password);
-    get_password("请再次输入新密码: ", password2);
-    if (password != password2) {
-        cout << "两次密码不一致！" << endl;
-        return 0;
-    }
     // 组装JSON
     json root;
     root["email"] = email;
     root["code"] = code;
-    root["password"] = password;
     string json_str = root.dump();
-    sendMsg(fd, RESET_PASSWORD_WITH_CODE);
-    sendMsg(fd, json_str);
-    recvMsg(fd, server_reply);
-    cout << server_reply << endl;
-    return server_reply == "密码重置成功";
-}
-
-int email_find_password(int fd) {
-    string email, code, server_reply;
     
-   
-    while (true) {
-        cout << "请输入你的邮箱: ";
-        getline(cin, email);
-        if (email.empty()) {
-            cout << "邮箱不能为空！" << endl;
-            continue;
-        }
-        break;
-    }
-    // 获取验证码
-    cout << "按回车获取验证码..." << endl;
-    cin.ignore(INT32_MAX, '\n');
-    sendMsg(fd, REQUEST_RESET_CODE); // 复用请求验证码的协议
-    sendMsg(fd, email);
-    recvMsg(fd, server_reply);
-    cout << server_reply << endl;
-    if (server_reply.find("失败") != string::npos) return 0;
-    // 循环输入验证码，不能为空
-    while (true) {
-        cout << "请输入收到的验证码: ";
-        getline(cin, code);
-        if (code.empty()) {
-            cout << "验证码不能为空！" << endl;
-            continue;
-        }
-        break;
-    }
-    // 组装JSON
-    json root;
-    root["email"] = email;
-    root["code"] = code;
-    string json_str = root.dump();
     sendMsg(fd, FIND_PASSWORD_WITH_CODE); // 需要在协议中定义 FIND_PASSWORD_WITH_CODE
     sendMsg(fd, json_str);
+    string server_reply;
     recvMsg(fd, server_reply);
     cout << server_reply << endl;
-    return server_reply == "找回密码成功";
+    if (server_reply == "找回密码成功") {
+        cout << "密码已找回，您可以使用新密码登录。" << endl;
+    } else {
+        cout << "找回密码失败，请检查验证码是否正确。" << endl;
+    }
 }
 

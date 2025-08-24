@@ -18,6 +18,10 @@
 #define C2S_PRIVATE_MESSAGE 1601              // 发送私聊消息
 #define C2S_GROUP_MESSAGE 1701                // 发送群聊消息
 #define C2S_EXIT_CHAT_REQUEST 1801              // 退出聊天请求
+// Registration
+#define C2S_REQUEST_CODE 11
+#define C2S_REGISTER_WITH_CODE 12
+
 #define C2S_ADD_FRIEND_REQUEST 1901             // 添加好友请求
 #define C2S_GET_FRIEND_REQUESTS 2001          // 获取好友请求列表
 #define C2S_RESPOND_TO_FRIEND_REQUEST 2101    // 响应好友请求
@@ -49,6 +53,7 @@
 // 文件传输
 #define C2S_SEND_FILE_REQUEST 4201            // 发送文件请求
 #define C2S_RECV_FILE_REQUEST 4301            // 接收文件请求
+#define C2S_REQUEST_OFFLINE_NOTIFICATIONS 4401    // 上线后，请求离线通知
 #define C2S_GET_GROUP_JOIN_REQUESTS 3001    // 获取群聊入群申请列表
 #define C2S_RESPOND_TO_GROUP_JOIN_REQUEST 3101// 响应入群申请
 

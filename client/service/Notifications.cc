@@ -49,7 +49,11 @@ void unifiedMessageReceiver( string UID) {
     int receiveFd = Socket();
     Connect(receiveFd, IP, PORT);
 
-    // 新协议不再需要手动注册接收者，服务器通过心跳来识别
+    // Immediately request offline notifications
+    json req;
+    req["flag"] = C2S_REQUEST_OFFLINE_NOTIFICATIONS;
+    req["data"]["uid"] = UID;
+    sendMsg(receiveFd, req.dump());
 
     string receivedMsg;
 
@@ -106,34 +110,27 @@ void processUnifiedMessage(const string& msg, bool& state) {
         return;
     }
 
-
-
-
-
-
     // 处理特殊系统响应,删除和屏蔽不需要保存到离线！！！只是一个提示提示完就消失了
     if (msg == "FRIEND_VERIFICATION_NEEDED") {
         string notifyMsg = "系统提示：对方开启了好友验证，你还不是他（她）朋友，请先发送朋友验证请求，对方验证通过后，才能聊天。";
             cout << YELLOW << notifyMsg << RESET << endl;
-        
+
         return;
     }
 
-    
-
     if (msg == "BLOCKED_MESSAGE") {
         string notifyMsg = "系统提示：消息已发出，但被对方拒收了。";
-       
+
             cout << YELLOW << notifyMsg << RESET << endl;
-        
+
         return;
     }
 
     if (msg == "DEACTIVATED_MESSAGE") {
         string notifyMsg = "系统提示：对方已注销，无法接收消息。";
-       
+
             cout << YELLOW << notifyMsg << RESET << endl;
-        
+
         return;
     }
     if (msg == "NO_IN_GROUP") {
@@ -141,7 +138,7 @@ void processUnifiedMessage(const string& msg, bool& state) {
        cout << YELLOW << notifyMsg << RESET << endl;
         return;
     }
-   
+
 
     // 处理通知消息
     if (msg == REQUEST_NOTIFICATION) {
@@ -150,11 +147,11 @@ void processUnifiedMessage(const string& msg, bool& state) {
             return;
     }
 
-    
+
     else if ( msg.find("deleteAC_notify:") == 0) {
         string groupName = msg.substr(16);
         string notifyMsg = "群聊[" + groupName + "]的群主已注销，群聊已解散";
-    
+
             cout << RED <<notifyMsg <<RESET << endl;
             return;
     }
@@ -163,27 +160,27 @@ void processUnifiedMessage(const string& msg, bool& state) {
     else if ( msg.find("REMOVE:") == 0) {
         string groupName = msg.substr(7);
         string notifyMsg = "你被移除群聊[" + groupName + "]";
-    
+
             cout << RED <<notifyMsg <<RESET << endl;
             return;
     }
      else if ( msg.find("DELETE:") == 0) {
         string groupName = msg.substr(7);
         string notifyMsg = "群聊[" + groupName + "]已被解散";
-    
+
             cout << RED <<notifyMsg <<RESET << endl;
             return;
     }
     else if (msg == GROUP_REQUEST) {
         string notifyMsg = "你收到一条群聊添加申请";
-        
+
             cout << notifyMsg << endl;
             return;
     }
     else if (msg.find("GROUP_REQUEST:") == 0) { // 第一个字符的索引位置
         string groupName = msg.substr(14); // 去掉"GROUP_REQUEST:"前缀
         string notifyMsg = "[" + groupName + "]你收到一条群聊添加申请";
-        
+
             cout << notifyMsg << endl;
             return;
     }
@@ -194,7 +191,7 @@ void processUnifiedMessage(const string& msg, bool& state) {
     }
     else if (msg.find("ADMIN_REMOVE:") == 0) {
         string notifyMsg = "你已被取消" + msg.substr(13) + "的管理权限";
-     
+
             cout << notifyMsg << endl;
             return;
     }
@@ -210,7 +207,7 @@ void processUnifiedMessage(const string& msg, bool& state) {
             notifyMsg = senderInfo + "给你发来一条消息";
         }
 
-       
+
             cout << notifyMsg << endl;
             return;
     }
@@ -225,27 +222,45 @@ void processUnifiedMessage(const string& msg, bool& state) {
     }
     else if (msg[0] == '{') {
         try {
+            json res = json::parse(msg);
+
+            // Handle History Response
+            if (res.contains("flag") && res["flag"].get<int>() == S2C_HISTORY_RESPONSE) {
+                if (res["data"].value("success", false)) {
+                    cout << YELLOW << "\n-------------------历史消息加载完毕-------------------" << RESET << endl;
+                    for (const auto& msg_str : res["data"]["history"]) {
+                        Message history_msg;
+                        history_msg.json_parse(msg_str.get<string>());
+                        if (history_msg.getUidFrom() == ClientState::myUID) {
+                            cout << "你: " << history_msg.getContent() << " (" << history_msg.getTime() << ")" << endl;
+                        } else {
+                            cout << history_msg.getUsername() << ": " << history_msg.getContent() << " (" << history_msg.getTime() << ")" << endl;
+                        }
+                    }
+                } else {
+                    cout << "[错误] 加载历史记录失败: " << res["data"].value("reason", "未知错误") << endl;
+                }
+                return; // End processing after handling history
+            }
+
+            // Handle Real-time Messages
             Message message;
             message.json_parse(msg);
-            if (message.getGroupName() == "1") {
-                // 私
+            if (message.getGroupName() == "1") { // Private Message
                 if (ClientState::inChat && message.getUidFrom() == ClientState::currentChatUID) {
-                    // 私聊
                     cout << message.getUsername() << ": " << message.getContent() << endl;
+                } else {
+                    cout << "\n[新消息] 您收到一条来自 " << message.getUsername() << " 的新消息" << endl;
                 }
-            } else {
-                // 群
+            } else { // Group Message
                 if (ClientState::inChat && message.getUidTo() == ClientState::currentChatUID) {
-                    // 群聊
-                    cout << "[" << message.getGroupName() << "] "
-                         << message.getUsername() << ": "
-                         << message.getContent() << endl;
+                    cout << "[" << message.getGroupName() << "] " << message.getUsername() << ": " << message.getContent() << endl;
+                } else {
+                     cout << "\n[新群聊消息] 您在群聊 [" << message.getGroupName() << "] 中收到一条新消息" << endl;
                 }
-                // 注意：不在当前群聊窗口的消息不在这里处理，由MESSAGE:通知处理
             }
         } catch (const exception& e) {
-            
-            cout << "消息解析失败，跳过" << endl;
+            cout << "消息解析失败，跳过: " << msg << endl;
         }
     }
 }

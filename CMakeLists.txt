@@ -22,9 +22,11 @@ include_directories(
 add_executable(
         server.out
         server/server.cc
+        server/LoginHandler.cc
 
         server/ServerState.cc
 
+        server/handlers/RegistrationHandlers.cc
         server/Redis.cc
         server/MySQL.cc
         server/group_chat.cc

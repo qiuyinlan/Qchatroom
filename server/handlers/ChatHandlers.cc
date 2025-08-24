@@ -123,16 +123,23 @@ void handlePrivateMessage(int epfd, int fd, const nlohmann::json& msg) {
     g_mysql.insertPrivateMessage(sender_uid, receiver_uid, content);
 
     Redis redis;
-    if (redis.connect() && redis.hexists("is_online", receiver_uid)) {
-        int receiver_fd = stoi(redis.hget("is_online", receiver_uid));
-        nlohmann::json forward_msg;
-        forward_msg["flag"] = S2C_PRIVATE_MESSAGE;
-        forward_msg["data"]["content"] = content;
-        forward_msg["data"]["sender_uid"] = sender_uid;
-        forward_msg["data"]["username"] = getUsernameFromRedis(sender_uid);
-        sendMsg(epfd, receiver_fd, forward_msg.dump());
+    if (redis.connect()) {
+        Message message(getUsernameFromRedis(sender_uid), sender_uid, receiver_uid, "1");
+        message.setContent(content);
+        string message_json = message.to_json();
+
+        if (redis.hexists("notification_fds", receiver_uid)) {
+            int receiver_fd = stoi(redis.hget("notification_fds", receiver_uid));
+            cout << "[实时消息] 接收方 " << receiver_uid << " 在线, 转发消息到 fd=" << receiver_fd << endl;
+            sendMsg(epfd, receiver_fd, message_json);
+        } else {
+            cout << "[实时消息] 接收方 " << receiver_uid << " 不在线, 存储为离线消息" << endl;
+            redis.lpush("off_msg:" + receiver_uid, sender_uid); // Storing sender UID for notification
+        }
     }
 }
+
+
 
 
 void handleExitChatRequest(int epfd, int fd, const nlohmann::json& msg) {
