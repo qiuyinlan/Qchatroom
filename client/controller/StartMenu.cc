@@ -326,17 +326,34 @@ void clientRegisterWithCode(int fd) {
     }
 
     // 3. 输入验证码和密码
-    cout << "请输入您收到的验证码: ";
-    getline(cin, code);
+     while (true) {
+        cout << "请输入收到的验证码: ";
+        getline(cin, code);
+        if (code.empty()) {
+            cout << "验证码不能为空！" << endl;
+            continue;
+        }
+        break;
+    }
+    string password2;
+    while (true) {
 
-    get_password("请输入密码: ",password);
+        get_password("请输入你的密码: ", password2);
+        get_password("请再次输入你的密码: ", password);
+         if (password != password2) {
+            cout << "两次密码不一致！请重新输入。" << endl;
+            continue;
+         }
+        
+        break;
+    }
 
     // 4. 发送所有信息到服务器进行最终注册
     nlohmann::json req_register;
     req_register["flag"] = C2S_REGISTER_WITH_CODE;
     req_register["data"]["email"] = email;
     req_register["data"]["username"] = username;
-    req_register["data"]["password"] = password;
+    req_register["data"]["password"] = password2;
     req_register["data"]["code"] = code;
     sendMsg(fd, req_register.dump());
 
@@ -347,32 +364,5 @@ void clientRegisterWithCode(int fd) {
     }
 
     cout << "服务器响应: " << response << endl;
-
-
-    while (true) {
-        cout << "请输入收到的验证码: ";
-        getline(cin, code);
-        if (code.empty()) {
-            cout << "验证码不能为空！" << endl;
-            continue;
-        }
-        break;
-    }
-    // 组装JSON
-    json root;
-    root["email"] = email;
-    root["code"] = code;
-    string json_str = root.dump();
-    
-    sendMsg(fd, FIND_PASSWORD_WITH_CODE); // 需要在协议中定义 FIND_PASSWORD_WITH_CODE
-    sendMsg(fd, json_str);
-    string server_reply;
-    recvMsg(fd, server_reply);
-    cout << server_reply << endl;
-    if (server_reply == "找回密码成功") {
-        cout << "密码已找回，您可以使用新密码登录。" << endl;
-    } else {
-        cout << "找回密码失败，请检查验证码是否正确。" << endl;
-    }
 }
 
